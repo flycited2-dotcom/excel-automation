@@ -122,11 +122,12 @@ def read_splithub_price(filepath):
         if group == 'Расходные материалы для монтажа (медь)':
             sub_order = _splithub_subsection_order(current_subsection, v2.lower())
 
+        name = f"{v2} {v3}".strip() if v3 else v2
         records.append({
             'article': v2,
             'group': group,
             'brand': current_brand,
-            'name': v3 if v3 else v2,
+            'name': name,
             'price_in': price,
             'price_out': price,
             'subsection_order': sub_order,
@@ -374,8 +375,11 @@ def build_pricelist(df, wb, config, group_order, group_after=None):
     max_order = 9999
     unique_groups = df['group'].unique().tolist()
     _group_after = group_after or {}
+    _group_positions = config.get('group_positions', {})
 
     def group_sort_key(g):
+        if g in _group_positions:
+            return _group_positions[g]
         pos = group_order.get(g)
         if pos is None:
             pos = group_order.get(g.rstrip())
