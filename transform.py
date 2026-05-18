@@ -11,6 +11,130 @@ from openpyxl.utils import get_column_letter
 
 BASE_DIR = Path(__file__).parent
 
+EXCLUDE_SUPPLIER_GROUPS = {'Кондиционеры инверторные', 'Кондиционеры он/офф'}
+
+_SPLITHUB_SUBSECTION_ORDER = {
+    'Медная труба': 1,
+    'Изоляция': 2,
+    'Кронштейны': 3,
+    'Дренаж': 5,
+    'Крепёж': 7,
+}
+
+
+def _splithub_group_from_series(series_lower):
+    if any(k in series_lower for k in ['кассетная', 'напольно-потолочная']):
+        return 'Полупромышленные сплит-системы'
+    if any(k in series_lower for k in ['inverter', 'invertor', 'inv']):
+        return 'Инверторные сплит-системы'
+    if any(k in series_lower for k in ['on/off', 'on-off']):
+        return 'Классические сплит-системы'
+    return None
+
+
+def _splithub_group_from_desc(desc_lower):
+    if 'инвертор' in desc_lower:
+        return 'Инверторные сплит-системы'
+    if 'on/off' in desc_lower or 'on-off' in desc_lower:
+        return 'Классические сплит-системы'
+    return None
+
+
+def _splithub_subsection_order(subsection, model_lower):
+    order = _SPLITHUB_SUBSECTION_ORDER.get(subsection)
+    if order is not None:
+        return order
+    if subsection == 'Прочее':
+        if 'пвс' in model_lower or 'провод' in model_lower:
+            return 6
+        if 'фреон' in model_lower:
+            return 8
+        return 4
+    return 0
+
+
+def read_splithub_price(filepath):
+    df_raw = pd.read_excel(filepath, header=None)
+
+    records = []
+    current_brand = ''
+    current_group = None
+    current_section = ''
+    current_subsection = ''
+
+    for _, row in df_raw.iterrows():
+        v0 = str(row.iloc[0]).strip() if pd.notna(row.iloc[0]) else ''
+        v1 = str(row.iloc[1]).strip() if pd.notna(row.iloc[1]) else ''
+        v2 = str(row.iloc[2]).strip() if pd.notna(row.iloc[2]) else ''
+        v3 = str(row.iloc[3]).strip() if pd.notna(row.iloc[3]) else ''
+        v4 = row.iloc[4] if len(row) > 4 and pd.notna(row.iloc[4]) else None
+
+        if v1 == 'ID' or v0 == 'Прайс-лист СплитХаб' or v0.startswith('Оптовые'):
+            continue
+
+        # Заголовок раздела/бренда: col0 есть, col1 пусто
+        if v0 and not v1:
+            if v0 == 'Медная труба':
+                current_section = 'Медная труба'
+                current_group = 'Расходные материалы для монтажа (медь)'
+                current_subsection = 'Медная труба'
+                current_brand = ''
+            elif v0 == 'Расходники':
+                current_section = 'Расходники'
+                current_group = 'Расходные материалы для монтажа (медь)'
+                current_subsection = ''
+                current_brand = ''
+            else:
+                current_brand = v0
+                current_section = 'split'
+                current_group = None
+                current_subsection = ''
+            continue
+
+        # Подзаголовок серии: col0 пусто, col1 есть
+        if not v0 and v1 and v1 != 'Фото':
+            if current_section == 'Расходники':
+                current_subsection = v1
+            elif current_section == 'split':
+                current_group = _splithub_group_from_series(v1.lower())
+            continue
+
+        # Строка товара: col0 — число
+        try:
+            float(v0)
+        except (ValueError, TypeError):
+            continue
+
+        if v4 is None:
+            continue
+        try:
+            price = float(v4)
+        except (ValueError, TypeError):
+            continue
+
+        group = current_group
+        if current_section == 'split' and group is None:
+            group = _splithub_group_from_desc(v3.lower())
+        if not group:
+            continue
+
+        sub_order = 0
+        if group == 'Расходные материалы для монтажа (медь)':
+            sub_order = _splithub_subsection_order(current_subsection, v2.lower())
+
+        records.append({
+            'article': v2,
+            'group': group,
+            'brand': current_brand,
+            'name': v3 if v3 else v2,
+            'price_in': price,
+            'price_out': price,
+            'subsection_order': sub_order,
+        })
+
+    return pd.DataFrame(records)
+
+
 COLORS = {
     'header_bg':   '1F4E79',
     'header_font': 'FFFFFF',
@@ -124,6 +248,7 @@ def read_supplier_price(filepath, config):
     df['brand'] = df['brand'].fillna('').astype(str).str.strip()
     df['name'] = df['name'].astype(str).str.strip()
 
+    df = df[~df['group'].isin(EXCLUDE_SUPPLIER_GROUPS)].reset_index(drop=True)
     return df
 
 
@@ -133,7 +258,13 @@ def apply_pricing(df, group_markups, homeline_prices, default_markup):
     df = df.copy()
     prices_out = []
 
+    has_price_out = 'price_out' in df.columns
+
     for _, row in df.iterrows():
+        if has_price_out and pd.notna(row.get('price_out')):
+            prices_out.append(row['price_out'])
+            continue
+
         article = row['article']
 
         if article in homeline_prices:
@@ -156,7 +287,7 @@ def apply_pricing(df, group_markups, homeline_prices, default_markup):
 
 # ─── Лист «Прайс клиента» ────────────────────────────────────────────────────
 
-def build_pricelist(df, wb, config, group_order):
+def build_pricelist(df, wb, config, group_order, group_after=None):
     ws = wb.active
     ws.title = 'Прайс клиента'
     company = config['company']
@@ -242,11 +373,17 @@ def build_pricelist(df, wb, config, group_order):
     # ─── Сортировка групп по заданному порядку ───
     max_order = 9999
     unique_groups = df['group'].unique().tolist()
+    _group_after = group_after or {}
 
     def group_sort_key(g):
         pos = group_order.get(g)
         if pos is None:
             pos = group_order.get(g.rstrip())
+        if pos is None and g in _group_after:
+            parent = _group_after[g]
+            parent_pos = group_order.get(parent) or group_order.get(parent.rstrip())
+            if parent_pos is not None:
+                pos = parent_pos + 0.5
         return pos if pos is not None else max_order
 
     sorted_groups = sorted(unique_groups, key=group_sort_key)
@@ -305,10 +442,24 @@ def transform(input_path, output_dir=None):
     group_order = load_group_order(config)
     print(f"  Позиций в порядке: {len(group_order)}")
 
+    splithub_path = BASE_DIR / config.get('splithub_file', 'splithub-price.xlsx')
+    if splithub_path.exists():
+        print("  Загружаю прайс СплитХаб...")
+        df_splithub = read_splithub_price(splithub_path)
+        print(f"  СплитХаб позиций: {len(df_splithub)}")
+        df = pd.concat([df, df_splithub], ignore_index=True)
+    else:
+        print(f"  Предупреждение: файл СплитХаб не найден ({splithub_path.name})")
+
     df = apply_pricing(df, group_markups, homeline_prices, default_markup)
 
+    # Сортировка расходников по подразделам внутри группы
+    if 'subsection_order' in df.columns:
+        df = df.sort_values('subsection_order', kind='stable').reset_index(drop=True)
+
+    group_after = config.get('group_after', {})
     wb = openpyxl.Workbook()
-    build_pricelist(df, wb, config, group_order)
+    build_pricelist(df, wb, config, group_order, group_after)
     # Лист «Наценки» НЕ добавляется — только 1 лист «Прайс клиента»
 
     if output_dir is None:

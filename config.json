@@ -21,6 +21,10 @@
   "group_order_file": "Места_по_группам_товара_исправлено.xlsx",
   "default_markup": 10,
   "output_prefix": "БытТехОпт",
+  "splithub_file": "splithub-price.xlsx",
+  "group_after": {
+    "Сушильные машины": "Стиральные машины"
+  },
   "telegram": {
     "bot_token": "8639233666:AAH1uhJP1gBKIPmKyHesCuP86sFL_BzIvz4",
     "channel_id": "-1001929222037"
