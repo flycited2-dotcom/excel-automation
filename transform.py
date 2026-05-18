@@ -1,5 +1,7 @@
 import json
+import math
 import os
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -12,6 +14,8 @@ from openpyxl.utils import get_column_letter
 BASE_DIR = Path(__file__).parent
 
 EXCLUDE_SUPPLIER_GROUPS = {'Кондиционеры инверторные', 'Кондиционеры он/офф'}
+GREE_BRANDS = {'DAICHI', 'DANTEX'}
+_TYPE_RE = re.compile(r'\s*\bon[-/]off\b|\s*\binv(erter|ertor)?\b|\s*\bинвертор\b', re.IGNORECASE)
 
 _SPLITHUB_SUBSECTION_ORDER = {
     'Медная труба': 1,
@@ -122,9 +126,12 @@ def read_splithub_price(filepath):
         if group == 'Расходные материалы для монтажа (медь)':
             sub_order = _splithub_subsection_order(current_subsection, v2.lower())
 
-        name = f"{v2} {v3}".strip() if v3 else v2
+        clean_model = _TYPE_RE.sub('', v2).strip()
+        name = f"{clean_model} {v3}".strip() if v3 else clean_model
+        if current_brand in GREE_BRANDS:
+            name = f"{name} (GREE)"
         records.append({
-            'article': v2,
+            'article': str(int(float(v1))) if v1 else v2,
             'group': group,
             'brand': current_brand,
             'name': name,
@@ -422,6 +429,11 @@ def build_pricelist(df, wb, config, group_order, group_after=None):
                     cell.number_format = '#,##0'
                 if alt_fill:
                     cell.fill = alt_fill
+
+            # Автовысота строки по длине наименования
+            name_len = len(str(item['name'])) if item['name'] else 0
+            lines = max(1, math.ceil(name_len / 85))
+            ws.row_dimensions[row].height = lines * 14.5
 
             row += 1
             num += 1
