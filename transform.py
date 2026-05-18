@@ -25,6 +25,23 @@ _SPLITHUB_SUBSECTION_ORDER = {
     'Крепёж': 7,
 }
 
+# Кастомный порядок расходников (нумерация по выводу: медь→изоляция→кронштейны→ленты→дренаж→кабель→крепёж→фреон)
+_RASHODNIKI_CUSTOM = [3,1,5,2,4,6,7,10,8,12,9,11,13,14,15,16,17,18,19,25,20,21,23,24,22]
+_RASHODNIKI_SORT_KEY = {pos: rank for rank, pos in enumerate(_RASHODNIKI_CUSTOM, start=1)}
+
+
+def _splithub_subsection_order(subsection, model_lower):
+    order = _SPLITHUB_SUBSECTION_ORDER.get(subsection)
+    if order is not None:
+        return order
+    if subsection == 'Прочее':
+        if 'пвс' in model_lower or 'провод' in model_lower:
+            return 6
+        if 'фреон' in model_lower:
+            return 8
+        return 4
+    return 0
+
 
 def _splithub_group_from_series(series_lower):
     if any(k in series_lower for k in ['кассетная', 'напольно-потолочная']):
@@ -44,17 +61,6 @@ def _splithub_group_from_desc(desc_lower):
     return None
 
 
-def _splithub_subsection_order(subsection, model_lower):
-    order = _SPLITHUB_SUBSECTION_ORDER.get(subsection)
-    if order is not None:
-        return order
-    if subsection == 'Прочее':
-        if 'пвс' in model_lower or 'провод' in model_lower:
-            return 6
-        if 'фреон' in model_lower:
-            return 8
-        return 4
-    return 0
 
 
 def read_splithub_price(filepath):
@@ -154,7 +160,7 @@ COLORS = {
     'alt_row':     'EBF3FB',
 }
 
-COL_WIDTHS = {'A': 7.57, 'B': 13.14, 'C': 14.43, 'D': 77.29, 'E': 16.0, 'F': 15.57}
+COL_WIDTHS = {'A': 7.57, 'B': 13.14, 'C': 22.5, 'D': 77.29, 'E': 16.0, 'F': 15.57}
 
 
 def load_config():
@@ -423,17 +429,17 @@ def build_pricelist(df, wb, config, group_order, group_after=None):
                 cell = ws.cell(row=row, column=ci, value=v)
                 cell.font = Font(size=10, name='Arial')
                 cell.border = _border()
-                cell.alignment = Alignment(vertical='center', wrap_text=(ci == 4))
+                cell.alignment = Alignment(vertical='center', wrap_text=(ci in (3, 4)))
                 if ci == 5:
                     cell.alignment = Alignment(horizontal='center', vertical='center')
                     cell.number_format = '#,##0'
                 if alt_fill:
                     cell.fill = alt_fill
 
-            # Автовысота строки по длине наименования
-            name_len = len(str(item['name'])) if item['name'] else 0
-            lines = max(1, math.ceil(name_len / 85))
-            ws.row_dimensions[row].height = lines * 14.5
+            # Автовысота: максимум по колонкам C (22.5 шир) и D (77.29 шир)
+            brand_lines = max(1, math.ceil(len(str(item['brand'])) / 24))
+            name_lines  = max(1, math.ceil(len(str(item['name']))  / 85))
+            ws.row_dimensions[row].height = max(brand_lines, name_lines) * 14.5
 
             row += 1
             num += 1
@@ -469,8 +475,13 @@ def transform(input_path, output_dir=None):
 
     df = apply_pricing(df, group_markups, homeline_prices, default_markup)
 
-    # Сортировка расходников по подразделам внутри группы
+    # Сортировка расходников: сначала по секциям, затем кастомный порядок
     if 'subsection_order' in df.columns:
+        df = df.sort_values('subsection_order', kind='stable').reset_index(drop=True)
+        mask_rash = df['group'] == 'Расходные материалы для монтажа (медь)'
+        rash_idx = df[mask_rash].index.tolist()
+        for seq_num, idx in enumerate(rash_idx, start=1):
+            df.at[idx, 'subsection_order'] = _RASHODNIKI_SORT_KEY.get(seq_num, seq_num)
         df = df.sort_values('subsection_order', kind='stable').reset_index(drop=True)
 
     group_after = config.get('group_after', {})
