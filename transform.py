@@ -10,6 +10,8 @@ import pandas as pd
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
+from openpyxl.drawing.image import Image as XLImage
+from openpyxl.drawing.spreadsheet_drawing import TwoCellAnchor, AnchorMarker
 
 BASE_DIR = Path(__file__).parent
 
@@ -182,6 +184,62 @@ def _apply(cell, style):
         setattr(cell, attr, val)
 
 
+def _table_px_width():
+    # Точная ширина столбца в пикселях по формуле Excel (MDW=7 для шрифта по умолч.)
+    # px = trunc(((256*width + trunc(128/MDW)) / 256) * MDW)
+    mdw = 7
+    pad = int(128 // mdw)
+    return sum(int((256 * w + pad) / 256 * mdw) for w in COL_WIDTHS.values())
+
+
+def _add_banner(ws, config, dark_fill):
+    """Вставляет баннер-картинку первой строкой шапки во всю ширину таблицы.
+    Возвращает смещение строк: 1 если баннер вставлен, иначе 0.
+
+    banner_aspect (config): целевое соотношение ширина:высота. Если картинка
+    «выше» (соотношение меньше), её центральная полоса обрезается до этого
+    соотношения — баннер остаётся во всю ширину, но ниже. None = без обрезки."""
+    import io
+    from PIL import Image as PILImage
+
+    banner_file = config.get('banner_file', 'banner.png')
+    banner_path = BASE_DIR / banner_file
+    if not banner_path.exists():
+        return 0
+
+    try:
+        pil = PILImage.open(banner_path)
+        w, h = pil.size
+        target_aspect = config.get('banner_aspect')
+        if target_aspect and (w / h) < target_aspect:
+            new_h = int(round(w / target_aspect))
+            top = (h - new_h) // 2
+            pil = pil.crop((0, top, w, top + new_h))
+            w, h = pil.size
+        buf = io.BytesIO()
+        pil.convert('RGB').save(buf, format='PNG')
+        buf.seek(0)
+        img = XLImage(buf)
+    except Exception as e:
+        print(f"  Предупреждение: не удалось загрузить баннер ({e})")
+        return 0
+
+    # Высота строки — по пропорциям картинки при ширине таблицы
+    table_w = _table_px_width()
+    banner_h_px = int(round(table_w * h / float(w)))
+
+    for col in range(1, 7):
+        ws.cell(1, col).fill = dark_fill
+    ws.row_dimensions[1].height = banner_h_px * 0.75  # пиксели → пункты
+
+    # Якорь точно по диапазону A1:F1 — правый край совпадает со столбцом F
+    _from = AnchorMarker(col=0, colOff=0, row=0, rowOff=0)
+    _to = AnchorMarker(col=6, colOff=0, row=1, rowOff=0)
+    img.anchor = TwoCellAnchor(editAs='twoCell', _from=_from, to=_to)
+    ws.add_image(img)
+    return 1
+
+
 # ─── Чтение порядка групп из файла ────────────────────────────────────────────
 
 def load_group_order(config):
@@ -311,44 +369,47 @@ def build_pricelist(df, wb, config, group_order, group_after=None):
 
     dark_fill = PatternFill('solid', start_color=COLORS['header_bg'])
 
-    # ─── Строка 1: Название компании ───
-    ws.merge_cells('A1:F1')
-    c = ws['A1']
+    # ─── Баннер (строка 1, если файл есть) ───
+    off = _add_banner(ws, config, dark_fill)
+
+    # ─── Название компании ───
+    ws.merge_cells(start_row=1 + off, start_column=1, end_row=1 + off, end_column=6)
+    c = ws.cell(1 + off, 1)
     c.value = company['name']
     c.font = Font(bold=True, size=22, name='Arial', color=COLORS['header_font'])
     c.fill = dark_fill
     c.alignment = Alignment(horizontal='center', vertical='center')
-    ws.row_dimensions[1].height = 38.1
+    ws.row_dimensions[1 + off].height = 38.1
     for col in range(2, 7):
-        ws.cell(1, col).fill = dark_fill
+        ws.cell(1 + off, col).fill = dark_fill
 
-    # ─── Строка 2: Город ───
-    ws.merge_cells('A2:F2')
-    c = ws['A2']
+    # ─── Город ───
+    ws.merge_cells(start_row=2 + off, start_column=1, end_row=2 + off, end_column=6)
+    c = ws.cell(2 + off, 1)
     c.value = company['city']
     c.font = Font(size=11, name='Arial', color=COLORS['city_font'])
     c.fill = dark_fill
     c.alignment = Alignment(horizontal='center', vertical='center')
-    ws.row_dimensions[2].height = 21.95
+    ws.row_dimensions[2 + off].height = 21.95
     for col in range(2, 7):
-        ws.cell(2, col).fill = dark_fill
+        ws.cell(2 + off, col).fill = dark_fill
 
-    # ─── Строка 3: Телефоны ───
-    ws.merge_cells('A3:F3')
-    c = ws['A3']
+    # ─── Телефоны ───
+    ws.merge_cells(start_row=3 + off, start_column=1, end_row=3 + off, end_column=6)
+    c = ws.cell(3 + off, 1)
     c.value = company['phones']
     c.font = Font(bold=True, size=10, name='Arial', color=COLORS['phone_font'])
     c.fill = dark_fill
     c.alignment = Alignment(horizontal='center', vertical='center')
-    ws.row_dimensions[3].height = 21.95
+    ws.row_dimensions[3 + off].height = 21.95
     for col in range(2, 7):
-        ws.cell(3, col).fill = dark_fill
+        ws.cell(3 + off, col).fill = dark_fill
 
-    # ─── Строка 4: Telegram с гиперссылками ───
+    # ─── Telegram с гиперссылками ───
     tg_links = company.get('telegram_links', [])
 
-    ws.merge_cells('A4:C4')
-    c = ws['A4']
+    ws.merge_cells(start_row=4 + off, start_column=1, end_row=4 + off, end_column=3)
+    c = ws.cell(4 + off, 1)
     if tg_links:
         c.value = tg_links[0]['text']
         c.hyperlink = tg_links[0]['url']
@@ -356,10 +417,10 @@ def build_pricelist(df, wb, config, group_order, group_after=None):
     c.fill = dark_fill
     c.alignment = Alignment(horizontal='left', vertical='center')
     for col in range(2, 4):
-        ws.cell(4, col).fill = dark_fill
+        ws.cell(4 + off, col).fill = dark_fill
 
-    ws.merge_cells('D4:F4')
-    c = ws['D4']
+    ws.merge_cells(start_row=4 + off, start_column=4, end_row=4 + off, end_column=6)
+    c = ws.cell(4 + off, 4)
     if len(tg_links) > 1:
         c.value = tg_links[1]['text']
         c.hyperlink = tg_links[1]['url']
@@ -367,10 +428,11 @@ def build_pricelist(df, wb, config, group_order, group_after=None):
     c.fill = dark_fill
     c.alignment = Alignment(horizontal='right', vertical='center')
     for col in range(5, 7):
-        ws.cell(4, col).fill = dark_fill
-    ws.row_dimensions[4].height = 21.95
+        ws.cell(4 + off, col).fill = dark_fill
+    ws.row_dimensions[4 + off].height = 21.95
 
-    # ─── Строка 5: Заголовки таблицы ───
+    # ─── Заголовки таблицы ───
+    header_row = 5 + off
     headers = ['№', 'Артикул', 'Бренд', 'Наименование', 'Цена (руб.)', 'Заказ (шт.)']
     header_style = {
         'font': Font(bold=True, size=10, name='Arial', color=COLORS['header_font']),
@@ -379,10 +441,10 @@ def build_pricelist(df, wb, config, group_order, group_after=None):
         'border': _border(),
     }
     for ci, h in enumerate(headers, 1):
-        _apply(ws.cell(row=5, column=ci, value=h), header_style)
+        _apply(ws.cell(row=header_row, column=ci, value=h), header_style)
 
-    ws.freeze_panes = 'A6'
-    ws.auto_filter.ref = 'A5:F5'
+    ws.freeze_panes = f'A{header_row + 1}'
+    ws.auto_filter.ref = f'A{header_row}:F{header_row}'
 
     # ─── Сортировка групп по заданному порядку ───
     max_order = 9999
@@ -406,7 +468,7 @@ def build_pricelist(df, wb, config, group_order, group_after=None):
     sorted_groups = sorted(unique_groups, key=group_sort_key)
 
     # ─── Данные ───
-    row = 6
+    row = header_row + 1
     num = 1
 
     for group in sorted_groups:
