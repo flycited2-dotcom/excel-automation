@@ -362,7 +362,6 @@ def apply_pricing(df, group_markups, homeline_prices, default_markup):
 def build_pricelist(df, wb, config, group_order, group_after=None):
     ws = wb.active
     ws.title = 'Прайс клиента'
-    company = config['company']
 
     for letter, w in COL_WIDTHS.items():
         ws.column_dimensions[letter].width = w
@@ -370,32 +369,12 @@ def build_pricelist(df, wb, config, group_order, group_after=None):
     dark_fill = PatternFill('solid', start_color=COLORS['header_bg'])
 
     # ─── Баннер (строка 1, если файл есть) ───
+    # Контакты (название, город, телефоны) вшиты в сам баннер,
+    # поэтому отдельных текстовых строк в шапке нет.
     off = _add_banner(ws, config, dark_fill)
 
-    # ─── Название компании ───
-    ws.merge_cells(start_row=1 + off, start_column=1, end_row=1 + off, end_column=6)
-    c = ws.cell(1 + off, 1)
-    c.value = company['name']
-    c.font = Font(bold=True, size=22, name='Arial', color=COLORS['header_font'])
-    c.fill = dark_fill
-    c.alignment = Alignment(horizontal='center', vertical='center')
-    ws.row_dimensions[1 + off].height = 38.1
-    for col in range(2, 7):
-        ws.cell(1 + off, col).fill = dark_fill
-
-    # ─── Телефоны ───
-    ws.merge_cells(start_row=2 + off, start_column=1, end_row=2 + off, end_column=6)
-    c = ws.cell(2 + off, 1)
-    c.value = company['phones']
-    c.font = Font(bold=True, size=10, name='Arial', color=COLORS['phone_font'])
-    c.fill = dark_fill
-    c.alignment = Alignment(horizontal='center', vertical='center')
-    ws.row_dimensions[2 + off].height = 21.95
-    for col in range(2, 7):
-        ws.cell(2 + off, col).fill = dark_fill
-
     # ─── Заголовки таблицы ───
-    header_row = 3 + off
+    header_row = 1 + off
     headers = ['№', 'Артикул', 'Бренд', 'Наименование', 'Цена (руб.)', 'Заказ (шт.)']
     header_style = {
         'font': Font(bold=True, size=10, name='Arial', color=COLORS['header_font']),
