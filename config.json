@@ -23,6 +23,7 @@
   "output_prefix": "БытТехОпт",
   "banner_file": "banner.png",
   "banner_aspect": 3.6,
+  "banner_height_pt": 165,
   "splithub_file": "splithub-price.xlsx",
   "group_positions": {
     "Классические сплит-системы": 1.0,

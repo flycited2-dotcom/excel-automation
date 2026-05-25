@@ -198,7 +198,11 @@ def _add_banner(ws, config, dark_fill):
 
     banner_aspect (config): целевое соотношение ширина:высота. Если картинка
     «выше» (соотношение меньше), её центральная полоса обрезается до этого
-    соотношения — баннер остаётся во всю ширину, но ниже. None = без обрезки."""
+    соотношения — баннер остаётся во всю ширину, но ниже. None = без обрезки.
+
+    banner_height_pt (config): фиксированная высота строки баннера в пунктах.
+    Если задана — используется напрямую (картинка растягивается якорем на всю
+    ширину A:F и эту высоту). Если None — высота считается по пропорциям."""
     import io
     from PIL import Image as PILImage
 
@@ -224,13 +228,15 @@ def _add_banner(ws, config, dark_fill):
         print(f"  Предупреждение: не удалось загрузить баннер ({e})")
         return 0
 
-    # Высота строки — по пропорциям картинки при ширине таблицы
-    table_w = _table_px_width()
-    banner_h_px = int(round(table_w * h / float(w)))
+    # Высота строки: фиксированная (banner_height_pt) или по пропорциям картинки
+    height_pt = config.get('banner_height_pt')
+    if not height_pt:
+        table_w = _table_px_width()
+        height_pt = int(round(table_w * h / float(w))) * 0.75  # px → пункты
 
     for col in range(1, 7):
         ws.cell(1, col).fill = dark_fill
-    ws.row_dimensions[1].height = banner_h_px * 0.75  # пиксели → пункты
+    ws.row_dimensions[1].height = height_pt
 
     # Якорь точно по диапазону A1:F1 — правый край совпадает со столбцом F
     _from = AnchorMarker(col=0, colOff=0, row=0, rowOff=0)
