@@ -506,7 +506,15 @@ def transform(input_path, output_dir=None):
     prefix = config.get('output_prefix', 'БытТехОпт')
     ts = datetime.today().strftime('%Y%m%d')
     output_path = str(Path(output_dir) / f"{prefix}_{ts}.xlsx")
-    wb.save(output_path)
+    try:
+        wb.save(output_path)
+    except PermissionError:
+        # Файл открыт в Excel — сохраняем под именем со временем, не падаем
+        alt = str(Path(output_dir) / f"{prefix}_{ts}_{datetime.now().strftime('%H%M%S')}.xlsx")
+        print(f"  Файл занят (открыт в Excel?): {Path(output_path).name}")
+        print(f"  Сохраняю под другим именем...")
+        wb.save(alt)
+        output_path = alt
     print(f"  Сохранено: {output_path}")
     return output_path
 
