@@ -383,56 +383,19 @@ def build_pricelist(df, wb, config, group_order, group_after=None):
     for col in range(2, 7):
         ws.cell(1 + off, col).fill = dark_fill
 
-    # ─── Город ───
+    # ─── Телефоны ───
     ws.merge_cells(start_row=2 + off, start_column=1, end_row=2 + off, end_column=6)
     c = ws.cell(2 + off, 1)
-    c.value = company['city']
-    c.font = Font(size=11, name='Arial', color=COLORS['city_font'])
+    c.value = company['phones']
+    c.font = Font(bold=True, size=10, name='Arial', color=COLORS['phone_font'])
     c.fill = dark_fill
     c.alignment = Alignment(horizontal='center', vertical='center')
     ws.row_dimensions[2 + off].height = 21.95
     for col in range(2, 7):
         ws.cell(2 + off, col).fill = dark_fill
 
-    # ─── Телефоны ───
-    ws.merge_cells(start_row=3 + off, start_column=1, end_row=3 + off, end_column=6)
-    c = ws.cell(3 + off, 1)
-    c.value = company['phones']
-    c.font = Font(bold=True, size=10, name='Arial', color=COLORS['phone_font'])
-    c.fill = dark_fill
-    c.alignment = Alignment(horizontal='center', vertical='center')
-    ws.row_dimensions[3 + off].height = 21.95
-    for col in range(2, 7):
-        ws.cell(3 + off, col).fill = dark_fill
-
-    # ─── Telegram с гиперссылками ───
-    tg_links = company.get('telegram_links', [])
-
-    ws.merge_cells(start_row=4 + off, start_column=1, end_row=4 + off, end_column=3)
-    c = ws.cell(4 + off, 1)
-    if tg_links:
-        c.value = tg_links[0]['text']
-        c.hyperlink = tg_links[0]['url']
-    c.font = Font(bold=True, size=12, name='Arial', color=COLORS['tg_font'], underline='single')
-    c.fill = dark_fill
-    c.alignment = Alignment(horizontal='left', vertical='center')
-    for col in range(2, 4):
-        ws.cell(4 + off, col).fill = dark_fill
-
-    ws.merge_cells(start_row=4 + off, start_column=4, end_row=4 + off, end_column=6)
-    c = ws.cell(4 + off, 4)
-    if len(tg_links) > 1:
-        c.value = tg_links[1]['text']
-        c.hyperlink = tg_links[1]['url']
-    c.font = Font(bold=True, size=12, name='Arial', color=COLORS['tg_font'], underline='single')
-    c.fill = dark_fill
-    c.alignment = Alignment(horizontal='right', vertical='center')
-    for col in range(5, 7):
-        ws.cell(4 + off, col).fill = dark_fill
-    ws.row_dimensions[4 + off].height = 21.95
-
     # ─── Заголовки таблицы ───
-    header_row = 5 + off
+    header_row = 3 + off
     headers = ['№', 'Артикул', 'Бренд', 'Наименование', 'Цена (руб.)', 'Заказ (шт.)']
     header_style = {
         'font': Font(bold=True, size=10, name='Arial', color=COLORS['header_font']),
