@@ -1,5 +1,4 @@
 import json
-import math
 import os
 import re
 import sys
@@ -182,6 +181,34 @@ def _border():
 def _apply(cell, style):
     for attr, val in style.items():
         setattr(cell, attr, val)
+
+
+def _wrapped_lines(text, max_chars):
+    """Сколько строк займёт текст при переносе по словам в колонке шириной
+    max_chars символов. Учитывает перенос по пробелам и слова длиннее ширины
+    (рвутся внутри слова). Используется для расчёта высоты строки."""
+    text = str(text) if text is not None else ''
+    if not text.strip():
+        return 1
+    total = 0
+    for paragraph in text.split('\n'):
+        cur = 0
+        lines = 1
+        for word in paragraph.split(' '):
+            wl = len(word)
+            if cur == 0:
+                cur = wl
+            elif cur + 1 + wl <= max_chars:
+                cur += 1 + wl
+            else:
+                lines += 1
+                cur = wl
+            # очень длинное слово, не влезающее в ширину, рвётся внутри
+            while cur > max_chars:
+                lines += 1
+                cur -= max_chars
+        total += lines
+    return max(1, total)
 
 
 def _table_px_width():
@@ -446,9 +473,10 @@ def build_pricelist(df, wb, config, group_order, group_after=None):
                 if alt_fill:
                     cell.fill = alt_fill
 
-            # Автовысота: максимум по колонкам C (22.5 шир) и D (77.29 шир)
-            brand_lines = max(1, math.ceil(len(str(item['brand'])) / 24))
-            name_lines  = max(1, math.ceil(len(str(item['name']))  / 85))
+            # Автовысота: перенос по словам в колонках C (22.5 шир) и D (77.29 шир).
+            # Ширина в символах берётся с запасом, чтобы текст не перекрывался.
+            brand_lines = _wrapped_lines(item['brand'], 21)
+            name_lines  = _wrapped_lines(item['name'], 75)
             ws.row_dimensions[row].height = max(brand_lines, name_lines) * 14.5
 
             row += 1
