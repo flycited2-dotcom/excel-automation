@@ -24,6 +24,14 @@
   "banner_file": "banner.png",
   "banner_aspect": 4.88,
   "splithub_file": "splithub-price.xlsx",
+  "tlt_input_dir": "price_TLT_input",
+  "tlt_category_map_file": "соответствие_категорий_ТЛТ.xlsx",
+  "tlt_extra_brands": [
+    "Vitek", "Centek", "Willmark", "Galaxy Line", "Maxwell", "Hyundai",
+    "Sakura", "Scarlett", "Starwind", "KELLI", "Polaris", "Blackton",
+    "Deerma", "Delta", "HOMESTAR", "Добрыня", "АКСИНЬЯ", "Matrix",
+    "Rondell", "Happy Panda", "LIRA", "RAGEX", "Energy", "Vinzer"
+  ],
   "group_positions": {
     "Классические сплит-системы": 1.0,
     "Инверторные сплит-системы": 1.3,

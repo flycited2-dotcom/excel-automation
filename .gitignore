@@ -5,6 +5,10 @@ output_test*/
 # Входные файлы поставщика
 input/
 
+# Личный прайс пользователя (ТЛТ) — данные не коммитим, папку сохраняем
+price_TLT_input/*
+!price_TLT_input/.gitkeep
+
 # Python
 __pycache__/
 *.pyc

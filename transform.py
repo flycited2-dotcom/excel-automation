@@ -17,6 +17,8 @@ BASE_DIR = Path(__file__).parent
 EXCLUDE_SUPPLIER_GROUPS = {'Кондиционеры инверторные', 'Кондиционеры он/офф'}
 GREE_BRANDS = {'DAICHI', 'DANTEX'}
 _TYPE_RE = re.compile(r'\s*\bon[-/]off\b|\s*\binv(erter|ertor)?\b|\s*\bинвертор\b', re.IGNORECASE)
+# Заголовок-категория в прайсе ТЛТ: начинается с номера (3.01, п11., 2.)
+_TLT_CAT_RE = re.compile(r'^\s*[\dпП][\d.]*\.?\s+')
 
 _SPLITHUB_SUBSECTION_ORDER = {
     'Медная труба': 1,
@@ -357,6 +359,106 @@ def read_supplier_price(filepath, config):
     return df
 
 
+# ─── Собственный прайс (ТЛТ) ──────────────────────────────────────────────────
+
+def load_tlt_category_map(config):
+    """Соответствие 'категория ТЛТ -> группа прайса' из xlsx-файла."""
+    path = BASE_DIR / config.get('tlt_category_map_file', 'соответствие_категорий_ТЛТ.xlsx')
+    if not path.exists():
+        return {}
+    df = pd.read_excel(path, header=0)
+    mapping = {}
+    for _, row in df.iterrows():
+        cat = str(row.iloc[0]).strip() if pd.notna(row.iloc[0]) else ''
+        grp = str(row.iloc[1]).strip() if len(row) > 1 and pd.notna(row.iloc[1]) else ''
+        if cat and grp:
+            mapping[cat] = grp
+    return mapping
+
+
+def build_tlt_brand_set(supplier_df, config):
+    """Известные бренды: из прайса поставщика + доп.список конфига.
+    Список отсортирован по убыванию длины — длинные бренды проверяются
+    первыми, чтобы 'Galaxy Line' находился раньше 'Galaxy'."""
+    brands = set()
+    if supplier_df is not None and 'brand' in supplier_df.columns:
+        brands |= {b.strip() for b in supplier_df['brand'].dropna().astype(str) if b.strip()}
+    brands |= {b.strip() for b in config.get('tlt_extra_brands', []) if b and b.strip()}
+    return sorted(brands, key=lambda b: -len(b))
+
+
+def _detect_tlt_brand(name, brands):
+    low = ' ' + name.lower() + ' '
+    for b in brands:
+        pat = r'(?<![a-zа-яё0-9])' + re.escape(b.lower()) + r'(?![a-zа-яё0-9])'
+        if re.search(pat, low):
+            return b
+    return ''
+
+
+def _parse_tlt_price(v):
+    if v is None:
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    s = str(v).replace('\xa0', '').replace(' ', '').replace(',', '.').strip()
+    if not s:
+        return None
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def pick_tlt_file(config):
+    """Самый свежий .xlsx/.xls в папке tlt_input_dir (временные ~$ игнорируются)."""
+    tlt_dir = BASE_DIR / config.get('tlt_input_dir', 'price_TLT_input')
+    if not tlt_dir.exists():
+        return None
+    files = [f for f in list(tlt_dir.glob('*.xlsx')) + list(tlt_dir.glob('*.xls'))
+             if not f.name.startswith('~$')]
+    if not files:
+        return None
+    return max(files, key=os.path.getmtime)
+
+
+def read_tlt_price(filepath, category_map, brands):
+    """Читает собственный прайс (выгрузка 1С): A=артикул, E=наименование,
+    N=цена. Строки-категории распознаются по числовому префиксу и отсутствию
+    цены. Цена идёт 1:1 (price_out = price_in) — наценка не применяется."""
+    wb = openpyxl.load_workbook(filepath, data_only=True, read_only=True)
+    ws = wb.active
+
+    records = []
+    current_cat = ''
+    for row in ws.iter_rows(values_only=True):
+        name = row[4] if len(row) > 4 else None
+        name = str(name).strip() if name is not None else ''
+        if not name or name == 'Номенклатура':
+            continue
+
+        price = _parse_tlt_price(row[13] if len(row) > 13 else None)
+        if price is None:
+            # не товар: заголовок-категория или служебная строка
+            if _TLT_CAT_RE.match(name):
+                current_cat = _TLT_CAT_RE.sub('', name).strip()
+            continue
+
+        if not current_cat:
+            continue
+        article = row[0] if len(row) > 0 else None
+        records.append({
+            'article': str(article).strip() if article is not None else '',
+            'group': category_map.get(current_cat, current_cat),
+            'brand': _detect_tlt_brand(name, brands),
+            'name': name,
+            'price_in': price,
+            'price_out': price,
+        })
+    wb.close()
+    return pd.DataFrame(records)
+
+
 # ─── Применение наценок ───────────────────────────────────────────────────────
 
 def apply_pricing(df, group_markups, homeline_prices, default_markup):
@@ -493,6 +595,9 @@ def transform(input_path, output_dir=None):
     df = read_supplier_price(input_path, config)
     print(f"  Загружено позиций: {len(df)}")
 
+    # Список известных брендов (для авто-определения бренда в прайсе ТЛТ)
+    tlt_brands = build_tlt_brand_set(df, config)
+
     print("  Загружаю наценки...")
     group_markups, homeline_prices = load_markups(config)
     default_markup = config.get('default_markup', 10)
@@ -511,6 +616,28 @@ def transform(input_path, output_dir=None):
         df = pd.concat([df, df_splithub], ignore_index=True)
     else:
         print(f"  Предупреждение: файл СплитХаб не найден ({splithub_path.name})")
+
+    # ─── Собственный прайс (ТЛТ) ───
+    tlt_path = pick_tlt_file(config)
+    if tlt_path:
+        print(f"  Загружаю прайс ТЛТ: {unicodedata.normalize('NFC', tlt_path.name)}")
+        tlt_map = load_tlt_category_map(config)
+        df_tlt = read_tlt_price(tlt_path, tlt_map, tlt_brands)
+        print(f"  ТЛТ позиций: {len(df_tlt)}")
+        if len(df_tlt):
+            existing = set(df['group'].unique())
+            mapped_targets = set(tlt_map.values())
+            new_groups = sorted(g for g in df_tlt['group'].unique()
+                                if g not in mapped_targets and g not in existing)
+            if new_groups:
+                print(f"  ⚠ Категории ТЛТ без соответствия (уйдут в конец прайса): "
+                      f"{', '.join(new_groups)}")
+            no_brand = int((df_tlt['brand'] == '').sum())
+            if no_brand:
+                print(f"  ТЛТ без определённого бренда: {no_brand}")
+            df = pd.concat([df, df_tlt], ignore_index=True)
+    else:
+        print("  Прайс ТЛТ не найден (папка пуста) — пропускаю")
 
     df = apply_pricing(df, group_markups, homeline_prices, default_markup)
 
