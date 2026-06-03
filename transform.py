@@ -161,6 +161,8 @@ COLORS = {
     'group_bg':    'BDD7EE',
     'group_font':  '1F4E79',
     'alt_row':     'EBF3FB',
+    'tlt_row':     'FCD5B4',  # подсветка товаров собственного прайса (ТЛТ)
+    'homeline_row': 'CCC0DA',  # подсветка товаров бренда HOMELINE
 }
 
 COL_WIDTHS = {'A': 7.57, 'B': 13.14, 'C': 22.5, 'D': 77.29, 'E': 16.0, 'F': 15.57}
@@ -454,6 +456,7 @@ def read_tlt_price(filepath, category_map, brands):
             'name': name,
             'price_in': price,
             'price_out': price,
+            'source': 'tlt',
         })
     wb.close()
     return pd.DataFrame(records)
@@ -551,6 +554,14 @@ def build_pricelist(df, wb, config, group_order, group_after=None):
     for group in sorted_groups:
         gdf = df[df['group'] == group]
 
+        # Сортировка внутри группы по бренду (колонка «Бренд») по алфавиту,
+        # внутри одного бренда — по наименованию. Регистронезависимо, стабильно.
+        # Так товары ТЛТ встраиваются в общий порядок по бренду, а не падают
+        # в конец. Расходники с кастомным порядком секций не трогаем.
+        if group != 'Расходные материалы для монтажа (медь)':
+            gdf = gdf.sort_values(['brand', 'name'],
+                                  key=lambda s: s.str.casefold(), kind='stable')
+
         ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=6)
         gc = ws.cell(row=row, column=1, value=group)
         gc.font = Font(bold=True, size=10, name='Arial', color=COLORS['group_font'])
@@ -560,7 +571,16 @@ def build_pricelist(df, wb, config, group_order, group_after=None):
 
         for _, item in gdf.iterrows():
             is_alt = (num % 2 == 0)
-            alt_fill = PatternFill('solid', start_color=COLORS['alt_row']) if is_alt else None
+            # Подсветка: HOMELINE и товары ТЛТ — своим цветом (перекрывает зебру)
+            brand_upper = str(item['brand']).strip().upper()
+            if brand_upper == 'HOMELINE':
+                row_fill = PatternFill('solid', start_color=COLORS['homeline_row'])
+            elif item.get('source') == 'tlt':
+                row_fill = PatternFill('solid', start_color=COLORS['tlt_row'])
+            elif is_alt:
+                row_fill = PatternFill('solid', start_color=COLORS['alt_row'])
+            else:
+                row_fill = None
 
             vals = [num, item['article'], item['brand'], item['name'], item['price_out'], '']
 
@@ -572,8 +592,8 @@ def build_pricelist(df, wb, config, group_order, group_after=None):
                 if ci == 5:
                     cell.alignment = Alignment(horizontal='center', vertical='center')
                     cell.number_format = '#,##0'
-                if alt_fill:
-                    cell.fill = alt_fill
+                if row_fill:
+                    cell.fill = row_fill
 
             # Автовысота: перенос по словам в колонках C (22.5 шир) и D (77.29 шир).
             # Ширина в символах берётся с запасом, чтобы текст не перекрывался.
