@@ -49,7 +49,7 @@
     "daily_time": "09:00"
   },
   "telegram": {
-    "bot_token": "8639233666:AAH1uhJP1gBKIPmKyHesCuP86sFL_BzIvz4",
+    "bot_token": "",
     "channel_id": "-1001929222037"
   }
 }

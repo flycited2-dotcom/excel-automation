@@ -8,7 +8,16 @@ BASE_DIR = Path(__file__).parent
 
 def load_config():
     with open(BASE_DIR / 'config.json', encoding='utf-8') as f:
-        return json.load(f)
+        config = json.load(f)
+    # Секреты (токен бота, id канала) держим ВНЕ git — в secrets.json.
+    # Если файл есть, его непустые значения перекрывают config.json.
+    secrets_file = BASE_DIR / 'secrets.json'
+    if secrets_file.exists():
+        with open(secrets_file, encoding='utf-8') as f:
+            secrets = json.load(f)
+        tg = config.setdefault('telegram', {})
+        tg.update({k: v for k, v in secrets.get('telegram', {}).items() if v})
+    return config
 
 
 def send_file(filepath: str, caption: str = None) -> bool:
