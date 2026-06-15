@@ -28,6 +28,19 @@ def setup_logging() -> logging.Logger:
     return logging.getLogger('daily')
 
 
+def latest_supplier_file():
+    """Самый свежий ранее скачанный прайс поставщика в input/ (без временных).
+    Используется как запас, если сайт поставщика недоступен."""
+    input_dir = BASE_DIR / 'input'
+    if not input_dir.exists():
+        return None
+    files = [f for f in list(input_dir.glob('*.xls')) + list(input_dir.glob('*.xlsx'))
+             if not f.name.startswith('~$') and not f.name.startswith('.')]
+    if not files:
+        return None
+    return max(files, key=lambda f: f.stat().st_mtime)
+
+
 def send_alert(log: logging.Logger, text: str) -> None:
     """Шлёт приватный алерт об ошибке, если задан alert_chat_id. Сам никогда не падает."""
     try:
@@ -70,8 +83,23 @@ def main() -> None:
                         "(будет использован предыдущий файл, если есть)", e)
 
         log.info("Шаг 1 — скачивание прайса поставщика...")
-        input_path = download_price()
-        log.info("Скачано: %s", input_path)
+        try:
+            input_path = download_price()
+            log.info("Скачано: %s", input_path)
+        except Exception as e:
+            # Сайт поставщика недоступен — не падаем, берём предыдущий прайс.
+            input_path = latest_supplier_file()
+            if input_path is None:
+                raise RuntimeError(
+                    f"Сайт поставщика недоступен ({e}) и нет предыдущего файла в input/"
+                )
+            log.warning("Скачать не удалось (%s). Использую предыдущий прайс: %s",
+                        e, input_path)
+            send_alert(
+                log,
+                f"ℹ️ БытТехОпт: сайт поставщика недоступен — рассылка собрана на "
+                f"ПРЕДЫДУЩЕМ прайсе ({input_path.name}). Проверьте при возможности."
+            )
 
         log.info("Шаг 2 — трансформация прайса...")
         output_path = transform(str(input_path))
