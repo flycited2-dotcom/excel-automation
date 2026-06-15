@@ -44,12 +44,30 @@ def send_alert(log: logging.Logger, text: str) -> None:
 
 
 def main() -> None:
+    # Планировщик Windows запускает скрипт с консолью в cp1251 — без этого
+    # print() с кириллицей/эмодзи (напр. ⚠ в transform) роняет весь прогон.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding='utf-8')
+        except Exception:
+            pass
+
     log = setup_logging()
     log.info("=== Ежедневный запуск ===")
     try:
         from download_price import download_price
+        from fetch_tlt_email import fetch_tlt_price
         from transform import transform
         from telegram_send import send_file
+
+        log.info("Шаг 0 — забор собственного прайса ТЛТ из почты...")
+        try:
+            tlt_path = fetch_tlt_price()
+            log.info("Прайс ТЛТ обновлён из почты: %s", tlt_path)
+        except Exception as e:
+            # Не критично: используем последний имеющийся файл в price_TLT_input/.
+            log.warning("Не удалось обновить прайс ТЛТ из почты: %s "
+                        "(будет использован предыдущий файл, если есть)", e)
 
         log.info("Шаг 1 — скачивание прайса поставщика...")
         input_path = download_price()

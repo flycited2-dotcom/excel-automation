@@ -30,7 +30,10 @@ def default_caption(config: dict) -> str:
         f"\n"
         f'<a href="https://splithub.ru/">https://splithub.ru/</a>\n'
         f"Ссылка на приложение:\n"
-        f'<a href="https://splithub.ru/app/">https://splithub.ru/app/</a>'
+        f'<a href="https://splithub.ru/app/">https://splithub.ru/app/</a>\n'
+        f"\n"
+        f"Наш канал в MAX:\n"
+        f'<a href="https://max.ru/join/eqkTPKXWFVu-Nz-Os5FlclE1b4EtgdkOQ4QZ0L9PmAE">https://max.ru/join/eqkTPKXWFVu-Nz-Os5FlclE1b4EtgdkOQ4QZ0L9PmAE</a>'
     )
 
 

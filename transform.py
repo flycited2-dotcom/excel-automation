@@ -424,22 +424,46 @@ def pick_tlt_file(config):
     return max(files, key=os.path.getmtime)
 
 
+# Запасной номер колонки с ценой, если заголовок «Цена» не найден.
+# Выгрузка 1С на почту: A=артикул, E=наименование, N=изображение, O=цена.
+_TLT_PRICE_COL_DEFAULT = 14  # O
+
+# Спецзначение группы в файле соответствий: товары этой категории ТЛГ
+# не попадают в итог (расходники берём только из прайса СплитХаб).
+_TLT_EXCLUDE = '(исключить)'
+
+
+def _find_tlt_price_col(rows, default=_TLT_PRICE_COL_DEFAULT):
+    """Ищет колонку цены по заголовку «Цена» в первых строках листа.
+    Формат выгрузки 1С может меняться (появилась колонка «Изображение»,
+    сдвинувшая цену из N в O), поэтому не полагаемся на жёсткий индекс."""
+    for row in rows[:15]:
+        for idx, cell in enumerate(row):
+            if cell is not None and str(cell).strip().lower() == 'цена':
+                return idx
+    return default
+
+
 def read_tlt_price(filepath, category_map, brands):
     """Читает собственный прайс (выгрузка 1С): A=артикул, E=наименование,
-    N=цена. Строки-категории распознаются по числовому префиксу и отсутствию
-    цены. Цена идёт 1:1 (price_out = price_in) — наценка не применяется."""
+    колонка цены определяется по заголовку «Цена» (обычно O). Строки-категории
+    распознаются по числовому префиксу и отсутствию цены. Цена идёт 1:1
+    (price_out = price_in) — наценка не применяется."""
     wb = openpyxl.load_workbook(filepath, data_only=True, read_only=True)
     ws = wb.active
 
+    rows = list(ws.iter_rows(values_only=True))
+    price_col = _find_tlt_price_col(rows)
+
     records = []
     current_cat = ''
-    for row in ws.iter_rows(values_only=True):
+    for row in rows:
         name = row[4] if len(row) > 4 else None
         name = str(name).strip() if name is not None else ''
         if not name or name == 'Номенклатура':
             continue
 
-        price = _parse_tlt_price(row[13] if len(row) > 13 else None)
+        price = _parse_tlt_price(row[price_col] if len(row) > price_col else None)
         if price is None:
             # не товар: заголовок-категория или служебная строка
             if _TLT_CAT_RE.match(name):
@@ -448,10 +472,15 @@ def read_tlt_price(filepath, category_map, brands):
 
         if not current_cat:
             continue
+        group = category_map.get(current_cat, current_cat)
+        # Категории, помеченные в файле соответствий как (исключить),
+        # выбрасываем: эти расходники берём только из прайса СплитХаб.
+        if group == _TLT_EXCLUDE:
+            continue
         article = row[0] if len(row) > 0 else None
         records.append({
             'article': str(article).strip() if article is not None else '',
-            'group': category_map.get(current_cat, current_cat),
+            'group': group,
             'brand': _detect_tlt_brand(name, brands),
             'name': name,
             'price_in': price,
