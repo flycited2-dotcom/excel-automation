@@ -20,6 +20,20 @@ def load_config():
     return config
 
 
+def default_caption(config: dict) -> str:
+    """Подпись к ежедневному прайсу — как в канале: эмодзи + активные ссылки."""
+    company = config.get('company', {}).get('name', '')
+    return (
+        f"✅ <b>Прайс обновлён</b>\n"
+        f"{company}\n"
+        f"Дата: {datetime.today().strftime('%d.%m.%Y')}\n"
+        f"\n"
+        f'<a href="https://splithub.ru/">https://splithub.ru/</a>\n'
+        f"Ссылка на приложение:\n"
+        f'<a href="https://splithub.ru/app/">https://splithub.ru/app/</a>'
+    )
+
+
 def send_file(filepath: str, caption: str = None) -> bool:
     try:
         import requests
@@ -39,15 +53,8 @@ def send_file(filepath: str, caption: str = None) -> bool:
         print("Ошибка: заполните telegram.channel_id в config.json")
         return False
 
-    company = config.get('company', {}).get('name', '')
     if caption is None:
-        caption = (
-            f"<b>📊 Прайс обновлён</b>\n"
-            f"{company}\n"
-            f"Дата: {datetime.today().strftime('%d.%m.%Y %H:%M')}\n"
-            f"\n"
-            f"https://splithub.ru/"
-        )
+        caption = default_caption(config)
 
     url = f"https://api.telegram.org/bot{token}/sendDocument"
     filepath = Path(filepath)
