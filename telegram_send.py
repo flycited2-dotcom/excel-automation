@@ -61,6 +61,34 @@ def send_file(filepath: str, caption: str = None) -> bool:
         return False
 
 
+def send_message(text: str, chat_id: str = None) -> bool:
+    """Отправляет текстовое сообщение в Telegram.
+    По умолчанию — в основной канал; для приватных алертов об ошибках
+    передавайте личный chat_id."""
+    try:
+        import requests
+    except ImportError:
+        print("Ошибка: установите пакет requests → pip install requests")
+        return False
+
+    config = load_config()
+    tg = config.get('telegram', {})
+    token = tg.get('bot_token', '').strip()
+    if not token:
+        print("Ошибка: заполните telegram.bot_token в config.json")
+        return False
+    if chat_id is None:
+        chat_id = tg.get('channel_id', '').strip()
+
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    resp = requests.post(url, data={'chat_id': chat_id, 'text': text}, timeout=30)
+    if resp.status_code == 200:
+        return True
+    err = resp.json().get('description', resp.text)
+    print(f"Ошибка Telegram ({resp.status_code}): {err}")
+    return False
+
+
 if __name__ == '__main__':
     if len(sys.argv) < 2:
         print("Использование: python telegram_send.py <файл.xlsx> [подпись]")

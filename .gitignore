@@ -9,6 +9,12 @@ input/
 price_TLT_input/*
 !price_TLT_input/.gitkeep
 
+# Секреты (логин/пароль поставщика, chat_id для алертов) — НЕ коммитим
+secrets.json
+
+# Логи ежедневного запуска
+logs/
+
 # Python
 __pycache__/
 *.pyc
