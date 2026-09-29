@@ -636,7 +636,7 @@ def build_pricelist(df, wb, config, group_order, group_after=None):
 
 # ─── Главная функция ──────────────────────────────────────────────────────────
 
-def transform(input_path, output_dir=None):
+def transform(input_path, output_dir=None, *, supplier_fallback=False):
     import unicodedata
     config = load_config()
 
@@ -721,6 +721,10 @@ def transform(input_path, output_dir=None):
         wb.save(alt)
         output_path = alt
     print(f"  Сохранено: {output_path}")
+    from ready_price import after_transform
+    after_transform(output_path, input_path=input_path,
+                    supplier_fallback=supplier_fallback,
+                    components=[splithub_path, tlt_path])
     return output_path
 
 

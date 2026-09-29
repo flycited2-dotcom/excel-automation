@@ -37,7 +37,15 @@ def default_caption(config: dict) -> str:
     )
 
 
-def send_file(filepath: str, caption: str = None) -> bool:
+def _document_mime_type(filepath: Path) -> str:
+    """MIME-тип для старого .xls и современного .xlsx."""
+    if filepath.suffix.lower() == '.xls':
+        return 'application/vnd.ms-excel'
+    return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+
+
+def _send_file(filepath: str, caption: str = None, chat_id: str = None) -> bool:
+    """Отправляет Excel-файл в канал или в явно указанный Telegram-чат."""
     try:
         import requests
     except ImportError:
@@ -47,13 +55,16 @@ def send_file(filepath: str, caption: str = None) -> bool:
     config = load_config()
     tg = config.get('telegram', {})
     token = tg.get('bot_token', '').strip()
-    channel_id = tg.get('channel_id', '').strip()
+    if chat_id is None:
+        chat_id = tg.get('channel_id', '').strip()
+    else:
+        chat_id = str(chat_id).strip()
 
     if not token:
         print("Ошибка: заполните telegram.bot_token в config.json")
         return False
-    if not channel_id:
-        print("Ошибка: заполните telegram.channel_id в config.json")
+    if not chat_id:
+        print("Ошибка: не задан Telegram chat_id для отправки файла")
         return False
 
     if caption is None:
@@ -66,8 +77,8 @@ def send_file(filepath: str, caption: str = None) -> bool:
         resp = requests.post(
             url,
             files={'document': (filepath.name, f,
-                   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')},
-            data={'chat_id': channel_id, 'caption': caption, 'parse_mode': 'HTML'},
+                   _document_mime_type(filepath))},
+            data={'chat_id': chat_id, 'caption': caption, 'parse_mode': 'HTML'},
             timeout=60,
         )
 
@@ -78,6 +89,29 @@ def send_file(filepath: str, caption: str = None) -> bool:
         err = resp.json().get('description', resp.text)
         print(f"Ошибка Telegram ({resp.status_code}): {err}")
         return False
+
+
+def send_file(filepath: str, caption: str = None, chat_id: str = None) -> bool:
+    """Доставка учитывается отдельно от успешного формирования итогового прайса."""
+    error_type = None
+    route = chat_id
+    try:
+        if route is None:
+            route = load_config().get('telegram', {}).get('channel_id', '')
+        ok = _send_file(filepath, caption, chat_id)
+    except Exception as exc:
+        # Текст requests-ошибки может содержать URL с токеном бота.
+        error_type = type(exc).__name__
+        print(f"Отправка Telegram не выполнена: {error_type}")
+        ok = False
+    try:
+        from ready_price import record_delivery, dispatch
+        record_delivery(filepath, 'sent' if ok else 'failed', chat_id=route,
+                        error_type=error_type)
+        dispatch()
+    except Exception as exc:
+        print(f"Не удалось записать статус доставки: {type(exc).__name__}")
+    return ok
 
 
 def send_message(text: str, chat_id: str = None) -> bool:

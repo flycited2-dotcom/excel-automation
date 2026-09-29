@@ -53,7 +53,39 @@ def send_alert(log: logging.Logger, text: str) -> None:
         else:
             log.info("alert_chat_id не задан — алерт только в логе")
     except Exception as e:
-        log.warning("Не удалось отправить алерт: %s", e)
+        log.warning("Не удалось отправить алерт: %s", type(e).__name__)
+
+
+def send_supplier_price(log: logging.Logger, filepath: Path,
+                        used_fallback: bool = False) -> None:
+    """Шлёт исходный прайс поставщика владельцу; сбой не останавливает рассылку."""
+    try:
+        from download_price import load_secrets
+        from telegram_send import send_file
+
+        telegram = load_secrets().get('telegram', {})
+        chat_id = (telegram.get('supplier_price_chat_id')
+                   or telegram.get('alert_chat_id') or '')
+        chat_id = str(chat_id).strip()
+        if not chat_id or chat_id.startswith('ВАШ'):
+            log.info("supplier_price_chat_id/alert_chat_id не задан — "
+                     "исходный прайс в личку не отправлен")
+            return
+
+        if used_fallback:
+            caption = (
+                "⚠️ <b>Исходный прайс поставщика</b>\n"
+                "Сайт недоступен — отправлена предыдущая сохранённая версия."
+            )
+        else:
+            caption = "📎 <b>Свежий исходный прайс поставщика</b>"
+
+        if send_file(str(filepath), caption=caption, chat_id=chat_id):
+            log.info("Исходный прайс отправлен владельцу в Telegram (%s)", chat_id)
+        else:
+            log.warning("Не удалось отправить исходный прайс владельцу в Telegram")
+    except Exception as e:
+        log.warning("Не удалось отправить исходный прайс владельцу: %s", type(e).__name__)
 
 
 def main() -> None:
@@ -83,11 +115,13 @@ def main() -> None:
                         "(будет использован предыдущий файл, если есть)", e)
 
         log.info("Шаг 1 — скачивание прайса поставщика...")
+        supplier_fallback = False
         try:
             input_path = download_price()
             log.info("Скачано: %s", input_path)
         except Exception as e:
             # Сайт поставщика недоступен — не падаем, берём предыдущий прайс.
+            supplier_fallback = True
             input_path = latest_supplier_file()
             if input_path is None:
                 raise RuntimeError(
@@ -101,8 +135,11 @@ def main() -> None:
                 f"ПРЕДЫДУЩЕМ прайсе ({input_path.name}). Проверьте при возможности."
             )
 
+        log.info("Шаг 1.1 — отправка исходного прайса владельцу...")
+        send_supplier_price(log, input_path, used_fallback=supplier_fallback)
+
         log.info("Шаг 2 — трансформация прайса...")
-        output_path = transform(str(input_path))
+        output_path = transform(str(input_path), supplier_fallback=supplier_fallback)
         log.info("Готов итоговый прайс: %s", output_path)
 
         log.info("Шаг 3 — отправка в Telegram...")
@@ -111,11 +148,11 @@ def main() -> None:
 
         log.info("=== Успех ===")
     except Exception as e:
-        log.error("ОШИБКА ежедневного запуска: %s", e, exc_info=True)
+        log.error("ОШИБКА ежедневного запуска: %s", type(e).__name__)
         send_alert(
             log,
             f"⚠️ БытТехОпт: автоотправка прайса не удалась.\n"
-            f"Причина: {e}\n"
+            f"Причина: {type(e).__name__}\n"
             f"Отправьте прайс вручную."
         )
         sys.exit(1)

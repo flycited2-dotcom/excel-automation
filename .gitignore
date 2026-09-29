@@ -15,6 +15,11 @@ secrets.json
 # Логи ежедневного запуска
 logs/
 
+# Готовые снимки и настройки локального импортёра Avito
+ready-price-outbox/
+ready-price-bridge.json
+.pytest_cache/
+
 # Python
 __pycache__/
 *.pyc
