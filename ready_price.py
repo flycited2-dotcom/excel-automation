@@ -88,7 +88,7 @@ def capture(output_path, *, input_path, supplier_fallback=False, components=(),
     data = path.read_bytes()
     book = load_workbook(BytesIO(data), read_only=True, data_only=True)
     try:
-        if book.sheetnames != ["Прайс клиента"] or tuple(c.value for c in book.active[2]) != (
+        if "Прайс клиента" not in book.sheetnames or tuple(c.value for c in book["Прайс клиента"][2][:6]) != (
             "№", "Артикул", "Бренд", "Наименование", "Цена (руб.)", "Заказ (шт.)"
         ):
             raise ValueError("Unexpected finished workbook structure")

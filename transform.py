@@ -526,9 +526,10 @@ def apply_pricing(df, group_markups, homeline_prices, default_markup):
 
 # ─── Лист «Прайс клиента» ────────────────────────────────────────────────────
 
-def build_pricelist(df, wb, config, group_order, group_after=None):
-    ws = wb.active
-    ws.title = 'Прайс клиента'
+def build_pricelist(df, wb, config, group_order, group_after=None, *, worksheet=None):
+    ws = worksheet if worksheet is not None else wb.active
+    if worksheet is None:
+        ws.title = 'Прайс клиента'
 
     for letter, w in COL_WIDTHS.items():
         ws.column_dimensions[letter].width = w
@@ -562,6 +563,10 @@ def build_pricelist(df, wb, config, group_order, group_after=None):
     _group_positions = config.get('group_positions', {})
 
     def group_sort_key(g):
+        from splithub_catalog import group_position
+        site_position = group_position(g)
+        if site_position is not None:
+            return site_position
         if g in _group_positions:
             return _group_positions[g]
         pos = group_order.get(g)
@@ -582,14 +587,24 @@ def build_pricelist(df, wb, config, group_order, group_after=None):
 
     for group in sorted_groups:
         gdf = df[df['group'] == group]
+        split_sections = group in ('Классические сплит-системы', 'Инверторные сплит-системы',
+                                  'Полупромышленные сплит-системы') or group.startswith('Полупромышленные — ')
+        if split_sections:
+            gdf = gdf.copy()
+            if 'series' not in gdf.columns:
+                gdf['series'] = ''
+            gdf['series'] = gdf['series'].fillna('').astype(str).str.strip()
+            capacities = gdf.get('capacity_btu', pd.Series(index=gdf.index, dtype=object))
+            gdf['_capacity'] = pd.to_numeric(capacities, errors='coerce')
 
         # Сортировка внутри группы по бренду (колонка «Бренд») по алфавиту,
         # внутри одного бренда — по наименованию. Регистронезависимо, стабильно.
         # Так товары ТЛТ встраиваются в общий порядок по бренду, а не падают
         # в конец. Расходники с кастомным порядком секций не трогаем.
         if group != 'Расходные материалы для монтажа (медь)':
-            gdf = gdf.sort_values(['brand', 'name'],
-                                  key=lambda s: s.str.casefold(), kind='stable')
+            sort_columns = ['brand', 'series', '_capacity', 'name'] if split_sections else ['brand', 'name']
+            gdf = gdf.sort_values(sort_columns,
+                                  key=lambda s: s.str.casefold() if s.dtype == object else s, kind='stable')
 
         ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=6)
         gc = ws.cell(row=row, column=1, value=group)
@@ -598,11 +613,41 @@ def build_pricelist(df, wb, config, group_order, group_after=None):
         gc.alignment = Alignment(horizontal='left', vertical='center', indent=1)
         row += 1
 
+        previous_brand = None
+        previous_series = None
+        brand_index = -1
+        brand_colors = ['E8F2FC', 'EDF5E8', 'FFF3DF', 'F2EBFA']
+
+        def add_separator(label, background, foreground, indent, height):
+            nonlocal row
+            ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=6)
+            for column in range(1, 7):
+                ws.cell(row, column).fill = PatternFill('solid', fgColor=background)
+            cell = ws.cell(row, 1, label)
+            cell.font = Font(name='Arial', size=10, bold=True, color=foreground)
+            cell.alignment = Alignment(vertical='center', indent=indent, wrap_text=True)
+            ws.row_dimensions[row].height = height
+            row += 1
+
         for _, item in gdf.iterrows():
+            if split_sections:
+                brand = str(item['brand']).strip()
+                series = item['series']
+                if brand.casefold() != previous_brand:
+                    brand_index += 1
+                    add_separator(brand or 'Бренд не указан', '4472C4', 'FFFFFF', 1, 23)
+                    previous_brand = brand.casefold()
+                    previous_series = None
+                if series.casefold() != previous_series:
+                    if series and series != '-':
+                        add_separator('Серия: ' + series, 'C2E8C7', '34495E', 2, 20)
+                    previous_series = series.casefold()
             is_alt = (num % 2 == 0)
             # Подсветка: HOMELINE и товары ТЛТ — своим цветом (перекрывает зебру)
             brand_upper = str(item['brand']).strip().upper()
-            if brand_upper == 'HOMELINE':
+            if split_sections:
+                row_fill = PatternFill('solid', fgColor=brand_colors[brand_index % 4])
+            elif brand_upper == 'HOMELINE':
                 row_fill = PatternFill('solid', start_color=COLORS['homeline_row'])
             elif item.get('source') == 'tlt':
                 row_fill = PatternFill('solid', start_color=COLORS['tlt_row'])
@@ -658,7 +703,13 @@ def transform(input_path, output_dir=None, *, supplier_fallback=False):
     print(f"  Позиций в порядке: {len(group_order)}")
 
     splithub_path = BASE_DIR / config.get('splithub_file', 'splithub-price.xlsx')
-    if splithub_path.exists():
+    if config.get('splithub_site_url'):
+        from splithub_catalog import load_catalog
+        print("  Загружаю актуальный каталог СплитХаб (только в наличии)...")
+        df_splithub, splithub_path = load_catalog(config)
+        print(f"  СплитХаб в наличии: {len(df_splithub)}")
+        df = pd.concat([df, df_splithub], ignore_index=True)
+    elif splithub_path.exists():
         print("  Загружаю прайс СплитХаб...")
         df_splithub = read_splithub_price(splithub_path)
         print(f"  СплитХаб позиций: {len(df_splithub)}")
@@ -688,6 +739,9 @@ def transform(input_path, output_dir=None, *, supplier_fallback=False):
     else:
         print("  Прайс ТЛТ не найден (папка пуста) — пропускаю")
 
+    excluded_brands = {str(brand).strip().casefold() for brand in config.get('excluded_brands', [])}
+    if excluded_brands:
+        df = df[~df['brand'].fillna('').str.strip().str.casefold().isin(excluded_brands)].copy()
     df = apply_pricing(df, group_markups, homeline_prices, default_markup)
 
     # Сортировка расходников: сначала по секциям, затем кастомный порядок
@@ -702,7 +756,8 @@ def transform(input_path, output_dir=None, *, supplier_fallback=False):
     group_after = config.get('group_after', {})
     wb = openpyxl.Workbook()
     build_pricelist(df, wb, config, group_order, group_after)
-    # Лист «Наценки» НЕ добавляется — только 1 лист «Прайс клиента»
+    from catalog_navigation import build_navigation, link_navigation_images
+    navigation_links = build_navigation(df, wb, config, group_order, group_after)
 
     if output_dir is None:
         output_dir = str(BASE_DIR / 'output')
@@ -720,6 +775,7 @@ def transform(input_path, output_dir=None, *, supplier_fallback=False):
         print(f"  Сохраняю под другим именем...")
         wb.save(alt)
         output_path = alt
+    link_navigation_images(output_path, navigation_links)
     print(f"  Сохранено: {output_path}")
     from ready_price import after_transform
     after_transform(output_path, input_path=input_path,

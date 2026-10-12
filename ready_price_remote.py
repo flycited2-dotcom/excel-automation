@@ -34,8 +34,8 @@ def push_release(release: Path, *, host="sprintbox-itp", remote_root="/opt/avito
         final = f"{remote_root}/inbox/{digest}.tgz"
         subprocess.run(["ssh", "-o", "BatchMode=yes", host,
                         f"umask 077; mkdir -p {remote_root}/incoming {remote_root}/inbox {remote_root}/archive"],
-                       check=True, timeout=30)
-        subprocess.run(["scp", "-q", str(bundle), f"{host}:{partial}"], check=True, timeout=120)
+                       check=True, timeout=30, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        subprocess.run(["scp", "-q", str(bundle), f"{host}:{partial}"], check=True, timeout=120, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         subprocess.run(["ssh", "-o", "BatchMode=yes", host,
-                        f"test -f {final} || mv {partial} {final}; rm -f {partial}"], check=True, timeout=30)
+                        f"test -f {final} || mv {partial} {final}; rm -f {partial}"], check=True, timeout=30, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     return digest
