@@ -21,7 +21,7 @@ def test_admin_stock_price_visibility_and_custom_items():
              'custom_products': [product(id='4', sku='new')]}
     df = catalog_frame(merge_products(base, admin))
     assert df.article.tolist() == ['2', '4']
-    assert apply_pricing(df, {}, {}, 50).price_out.tolist() == [125, 100]
+    assert apply_pricing(df, {}, 50).price_out.tolist() == [125, 100]
 
 
 @pytest.mark.parametrize('stock', ['out', 'order_7', 'days_1_2', 'wait', None])

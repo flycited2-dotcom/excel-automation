@@ -302,39 +302,29 @@ def load_group_order(config):
 def load_markups(config):
     markups_path = BASE_DIR / config.get('markups_file', 'наценки по группам товара.xlsx')
     if not markups_path.exists():
-        return {}, {}
+        return {}
 
     df = pd.read_excel(markups_path, skiprows=2, header=None)
 
     group_markups = {}
-    homeline_prices = {}
-    in_homeline = False
 
     for _, row in df.iterrows():
         col_b = str(row.iloc[1]).strip() if pd.notna(row.iloc[1]) else ''
         col_c = row.iloc[2] if len(row) > 2 else None
 
+        # Ниже строки «Артикул» — старый блок фикс-цен HOMELINE. Он отключён:
+        # HOMELINE считается обычной наценкой по группе от цены Технолидера.
         if col_b == 'Артикул':
-            in_homeline = True
-            continue
+            break
 
-        if not in_homeline:
-            if col_b and col_b not in ('Группа товара', 'Наценка (%)', 'nan'):
-                try:
-                    markup_val = int(float(col_c)) if pd.notna(col_c) else 0
-                    group_markups[col_b] = markup_val
-                except (ValueError, TypeError):
-                    pass
-        else:
-            article = col_b
-            col_d = row.iloc[3] if len(row) > 3 else None
-            if article and article != 'nan' and col_d is not None and pd.notna(col_d):
-                try:
-                    homeline_prices[article] = float(col_d)
-                except (ValueError, TypeError):
-                    pass
+        if col_b and col_b not in ('Группа товара', 'Наценка (%)', 'nan'):
+            try:
+                markup_val = int(float(col_c)) if pd.notna(col_c) else 0
+                group_markups[col_b] = markup_val
+            except (ValueError, TypeError):
+                pass
 
-    return group_markups, homeline_prices
+    return group_markups
 
 
 # ─── Чтение прайса поставщика ─────────────────────────────────────────────────
@@ -493,7 +483,7 @@ def read_tlt_price(filepath, category_map, brands):
 
 # ─── Применение наценок ───────────────────────────────────────────────────────
 
-def apply_pricing(df, group_markups, homeline_prices, default_markup):
+def apply_pricing(df, group_markups, default_markup):
     df = df.copy()
     prices_out = []
 
@@ -502,12 +492,6 @@ def apply_pricing(df, group_markups, homeline_prices, default_markup):
     for _, row in df.iterrows():
         if has_price_out and pd.notna(row.get('price_out')):
             prices_out.append(row['price_out'])
-            continue
-
-        article = row['article']
-
-        if article in homeline_prices:
-            prices_out.append(homeline_prices[article])
             continue
 
         group = row['group']
@@ -693,10 +677,9 @@ def transform(input_path, output_dir=None, *, supplier_fallback=False):
     tlt_brands = build_tlt_brand_set(df, config)
 
     print("  Загружаю наценки...")
-    group_markups, homeline_prices = load_markups(config)
+    group_markups = load_markups(config)
     default_markup = config.get('default_markup', 10)
     print(f"  Наценки по группам: {len(group_markups)}")
-    print(f"  HOMELINE фикс. цены: {len(homeline_prices)}")
 
     print("  Загружаю порядок групп...")
     group_order = load_group_order(config)
@@ -742,7 +725,7 @@ def transform(input_path, output_dir=None, *, supplier_fallback=False):
     excluded_brands = {str(brand).strip().casefold() for brand in config.get('excluded_brands', [])}
     if excluded_brands:
         df = df[~df['brand'].fillna('').str.strip().str.casefold().isin(excluded_brands)].copy()
-    df = apply_pricing(df, group_markups, homeline_prices, default_markup)
+    df = apply_pricing(df, group_markups, default_markup)
 
     # Сортировка расходников: сначала по секциям, затем кастомный порядок
     if 'subsection_order' in df.columns:
