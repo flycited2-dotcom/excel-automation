@@ -2,6 +2,7 @@ import json
 import sys
 from datetime import datetime
 from pathlib import Path
+from html import escape
 
 BASE_DIR = Path(__file__).parent
 
@@ -20,13 +21,14 @@ def load_config():
     return config
 
 
-def default_caption(config: dict) -> str:
+def default_caption(config: dict, note: str = '', issue_date: str = None) -> str:
     """Подпись к ежедневному прайсу — как в канале: эмодзи + активные ссылки."""
-    company = config.get('company', {}).get('name', '')
+    company = escape(config.get('company', {}).get('name', ''))
     return (
         f"✅ <b>Прайс обновлён</b>\n"
         f"{company}\n"
-        f"Дата: {datetime.today().strftime('%d.%m.%Y')}\n"
+        f"Дата: {issue_date or datetime.today().strftime('%d.%m.%Y')}\n"
+        + (f"\n{note}\n" if note else '') +
         f"\n"
         f'<a href="https://splithub.ru/">https://splithub.ru/</a>\n'
         f"Ссылка на приложение:\n"
@@ -42,6 +44,17 @@ def _document_mime_type(filepath: Path) -> str:
     if filepath.suffix.lower() == '.xls':
         return 'application/vnd.ms-excel'
     return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+
+
+def manager_keyboard(config):
+    url = config.get('telegram', {}).get('manager_url', '').strip()
+    if not url:
+        return None
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    if parsed.scheme != 'https' or parsed.hostname != 't.me' or not parsed.path.strip('/'):
+        raise ValueError('manager_url must be a Telegram HTTPS contact link')
+    return {'inline_keyboard': [[{'text': '💬 Написать менеджеру', 'url': url, 'style': 'success'}]]}
 
 
 def _send_file(filepath: str, caption: str = None, chat_id: str = None) -> bool:
@@ -67,22 +80,42 @@ def _send_file(filepath: str, caption: str = None, chat_id: str = None) -> bool:
         print("Ошибка: не задан Telegram chat_id для отправки файла")
         return False
 
+    news = None
     if caption is None:
-        caption = default_caption(config)
+        note, issue_date = '', None
+        if str(chat_id) == str(tg.get('channel_id', '')):
+            try:
+                from daily_price_news import prepare_note
+                note, news = prepare_note(filepath, chat_id)
+                if news:
+                    issue_date = datetime.strptime(news['date'], '%Y-%m-%d').strftime('%d.%m.%Y')
+            except Exception as exc:
+                print(f"Подпись без аналитики: {type(exc).__name__}")
+        caption = default_caption(config, note, issue_date)
 
     url = f"https://api.telegram.org/bot{token}/sendDocument"
     filepath = Path(filepath)
+    data = {'chat_id': chat_id, 'caption': caption, 'parse_mode': 'HTML'}
+    if str(chat_id) == str(tg.get('channel_id', '')) and filepath.suffix.lower() == '.xlsx':
+        keyboard = manager_keyboard(config)
+        if keyboard:
+            data['reply_markup'] = json.dumps(keyboard, ensure_ascii=False)
 
     with open(filepath, 'rb') as f:
         resp = requests.post(
             url,
             files={'document': (filepath.name, f,
                    _document_mime_type(filepath))},
-            data={'chat_id': chat_id, 'caption': caption, 'parse_mode': 'HTML'},
+            data=data,
             timeout=60,
         )
 
     if resp.status_code == 200:
+        try:
+            from daily_price_news import record_success
+            record_success(news, chat_id)
+        except Exception as exc:
+            print(f"Не удалось сохранить историю подписи: {type(exc).__name__}")
         print(f"Файл отправлен в Telegram: {filepath.name}")
         return True
     else:

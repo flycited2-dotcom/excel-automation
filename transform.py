@@ -428,7 +428,7 @@ def pick_tlt_file(config):
 # Выгрузка 1С на почту: A=артикул, E=наименование, N=изображение, O=цена.
 _TLT_PRICE_COL_DEFAULT = 14  # O
 
-# Спецзначение группы в файле соответствий: товары этой категории ТЛГ
+# Спецзначение группы в файле соответствий: товары этой категории ТЛТ
 # не попадают в итог (расходники берём только из прайса СплитХаб).
 _TLT_EXCLUDE = '(исключить)'
 
@@ -776,6 +776,10 @@ def transform(input_path, output_dir=None, *, supplier_fallback=False):
         wb.save(alt)
         output_path = alt
     link_navigation_images(output_path, navigation_links)
+    from workbook_media import optimize_workbook_images
+    optimize_workbook_images(output_path)
+    from daily_price_news import write_snapshot
+    write_snapshot(df, output_path, supplier_fallback=supplier_fallback)
     print(f"  Сохранено: {output_path}")
     from ready_price import after_transform
     after_transform(output_path, input_path=input_path,

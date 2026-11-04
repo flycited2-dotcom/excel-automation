@@ -55,6 +55,7 @@
   },
   "telegram": {
     "bot_token": "",
+    "manager_url": "https://t.me/B2B_opt_simf",
     "channel_id": "-1001929222037"
   }
 }
