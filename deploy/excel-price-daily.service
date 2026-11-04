@@ -1,0 +1,15 @@
+[Unit]
+Description=БытТехОпт — ежедневная сборка и отправка прайса в Telegram
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=pricebot
+Group=pricebot
+WorkingDirectory=/opt/excel-automation
+Environment=PYTHONIOENCODING=utf-8
+ExecStart=/opt/excel-automation/.venv/bin/python -X utf8 daily.py
+ExecStartPost=/opt/excel-automation/deploy/cleanup.sh
+TimeoutStartSec=30min
+Nice=5

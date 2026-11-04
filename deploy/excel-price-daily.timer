@@ -1,0 +1,10 @@
+[Unit]
+Description=БытТехОпт — запуск прайса ежедневно в 09:22 МСК
+
+[Timer]
+OnCalendar=*-*-* 09:22:00 Europe/Moscow
+# Если сервер был выключен в 09:22 — запустить сразу после загрузки.
+Persistent=true
+
+[Install]
+WantedBy=timers.target
