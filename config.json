@@ -26,6 +26,19 @@
   "splithub_file": "splithub-price.xlsx",
   "splithub_site_url": "https://splithub.ru",
   "excluded_brands": ["AKAI", "BOSCH", "COOLUP", "ALFACOOL"],
+  "brand_rules": {
+    "HOMELINE": {
+      "supplier_only": true,
+      "markups": {
+        "лари": 4,
+        "стиральн": 4,
+        "холодильн": 4,
+        "духовк": 5,
+        "мини-печ": 5
+      },
+      "round_to": 95
+    }
+  },
   "tlt_input_dir": "price_TLT_input",
   "tlt_category_map_file": "соответствие_категорий_ТЛТ.xlsx",
   "tlt_extra_brands": [

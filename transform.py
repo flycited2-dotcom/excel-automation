@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import re
 import sys
@@ -483,7 +484,31 @@ def read_tlt_price(filepath, category_map, brands):
 
 # ─── Применение наценок ───────────────────────────────────────────────────────
 
-def apply_pricing(df, group_markups, default_markup):
+def round_to_ending(price, ending):
+    """Ближайшая цена, оканчивающаяся на ending (95 → …95) при шаге 100."""
+    return math.floor((price - ending) / 100 + 0.5) * 100 + ending
+
+
+def _brand_rule(brand, brand_rules):
+    key = str(brand or '').strip().casefold()
+    for name, rule in (brand_rules or {}).items():
+        if name.strip().casefold() == key:
+            return rule
+    return None
+
+
+def drop_supplier_only_brands(df, brand_rules):
+    """Убрать из прайса ТЛТ бренды, которые берутся только у Технолидера."""
+    names = [n.strip().casefold() for n, r in (brand_rules or {}).items() if r.get('supplier_only')]
+    if not names or 'source' not in df.columns:
+        return df
+    brand = df['brand'].fillna('').astype(str).str.strip().str.casefold()
+    title = df['name'].fillna('').astype(str).str.casefold()
+    hit = brand.isin(names) | title.apply(lambda t: any(n in t for n in names))
+    return df[~((df['source'] == 'tlt') & hit)].copy()
+
+
+def apply_pricing(df, group_markups, default_markup, brand_rules=None):
     df = df.copy()
     prices_out = []
 
@@ -501,8 +526,21 @@ def apply_pricing(df, group_markups, default_markup):
         if markup_pct is None:
             markup_pct = default_markup
 
+        # Правила бренда (config.json → brand_rules): своя наценка по ключевому
+        # слову группы и округление до окончания (например, …95).
+        rule = _brand_rule(row.get('brand'), brand_rules)
+        if rule:
+            group_cf = str(group).casefold()
+            for keyword, pct in rule.get('markups', {}).items():
+                if keyword.casefold() in group_cf:
+                    markup_pct = pct
+                    break
+
         price = row['price_in'] * (1 + markup_pct / 100)
-        prices_out.append(round(price, 0))
+        if rule and rule.get('round_to') is not None:
+            prices_out.append(round_to_ending(price, rule['round_to']))
+        else:
+            prices_out.append(round(price, 0))
 
     df['price_out'] = prices_out
     return df
@@ -725,7 +763,12 @@ def transform(input_path, output_dir=None, *, supplier_fallback=False):
     excluded_brands = {str(brand).strip().casefold() for brand in config.get('excluded_brands', [])}
     if excluded_brands:
         df = df[~df['brand'].fillna('').str.strip().str.casefold().isin(excluded_brands)].copy()
-    df = apply_pricing(df, group_markups, default_markup)
+    brand_rules = config.get('brand_rules', {})
+    before = len(df)
+    df = drop_supplier_only_brands(df, brand_rules)
+    if len(df) != before:
+        print(f"  Убрано из ТЛТ (бренд только от Технолидера): {before - len(df)}")
+    df = apply_pricing(df, group_markups, default_markup, brand_rules)
 
     # Сортировка расходников: сначала по секциям, затем кастомный порядок
     if 'subsection_order' in df.columns:
