@@ -1,0 +1,13 @@
+[Unit]
+Description=БытТехОпт — доставка выпусков прайса на сервер Avito (повтор)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=pricebot
+Group=pricebot
+WorkingDirectory=/opt/excel-automation
+ExecStart=/opt/excel-automation/.venv/bin/python -X utf8 ready_price_sync.py
+TimeoutStartSec=10min
+Nice=10

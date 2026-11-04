@@ -1,0 +1,25 @@
+#!/bin/sh
+# Ставится на сервер Avito (Sprintbox) в /usr/local/bin/receive-ready-price.
+# Вызывается ТОЛЬКО как forced command для ключа VPS прайса в authorized_keys:
+#   command="/usr/local/bin/receive-ready-price",restrict ssh-ed25519 AAAA... excel-vps-avito
+# Принимает tgz-выпуск из stdin и атомарно кладёт его в inbox. Больше ничего не умеет.
+set -eu
+request="${SSH_ORIGINAL_COMMAND:-}"
+digest="${request#receive }"
+if [ "$request" = "$digest" ] || [ "${#digest}" -ne 64 ]; then
+    echo "usage: receive <sha256>" >&2
+    exit 2
+fi
+case "$digest" in
+    *[!0-9a-f]*) echo "invalid digest" >&2; exit 2 ;;
+esac
+root=/opt/avito-ready-price
+umask 077
+mkdir -p "$root/incoming" "$root/inbox" "$root/archive"
+partial="$root/incoming/$digest.tgz.partial"
+final="$root/inbox/$digest.tgz"
+trap 'rm -f "$partial"' EXIT
+head -c 104857600 > "$partial"
+gzip -t "$partial"
+[ -f "$final" ] || mv "$partial" "$final"
+echo ok

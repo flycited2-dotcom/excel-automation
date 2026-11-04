@@ -7,9 +7,50 @@ import sys
 from ready_price import BASE_DIR, locked, utcnow, write_json
 
 
+def push_only(cfg):
+    """Режим VPS: без локального avito-bridge доставить полные выпуски на сервер Avito.
+
+    Проверку структуры, свежести и происхождения выполняет импортёр на сервере Avito.
+    Fallback-снимки (partial) не отправляются: их там всё равно поместят в карантин.
+    """
+    import ready_price_remote
+    outbox = Path(cfg["outbox"])
+    remote = cfg.get("remote_push", {})
+    results = []
+    with locked(outbox / ".sync"):
+        manifests = []
+        for path in outbox.glob("*/release.json"):
+            try:
+                metadata = json.loads(path.read_text(encoding="utf-8"))
+                manifests.append((metadata.get("generated_at", ""), path, metadata))
+            except (ValueError, OSError):
+                results.append({"event": path.parent.name, "status": "error", "reason": "invalid_release_json"})
+        for _, manifest, metadata in sorted(manifests, key=lambda item: item[0]):
+            pushed = manifest.parent / "remote-push.json"
+            if pushed.exists() or metadata.get("snapshot_kind") != "full" or not remote.get("enabled"):
+                continue
+            try:
+                digest = ready_price_remote.push_release(
+                    manifest, host=remote.get("host", "sprintbox-itp"),
+                    remote_root=remote.get("root", "/opt/avito-ready-price"),
+                    transport=remote.get("transport", "scp"))
+                write_json(pushed, {"sha256": digest, "status": "uploaded", "at": utcnow()})
+                results.append({"event": manifest.parent.name, "status": "uploaded"})
+            except Exception as exc:
+                # Не логируем текст исключения: там могут быть адреса и пути.
+                results.append({"event": manifest.parent.name, "stage": "remote_push",
+                                 "status": "error", "reason": type(exc).__name__})
+        write_json(outbox / "sync-status.json", {"checked_at": utcnow(), "mode": "push_only",
+                   "results": results, "remote_transfer_enabled": bool(remote.get("enabled"))})
+    print(json.dumps({"processed": len(results), "statuses": [r["status"] for r in results]}, ensure_ascii=True))
+    return 1 if any(r["status"] == "error" for r in results) else 0
+
+
 def sync(config_path=None):
     config_path = Path(config_path) if config_path else BASE_DIR / "ready-price-bridge.json"
     cfg = json.loads(config_path.read_text(encoding="utf-8"))
+    if cfg.get("mode") == "push_only":
+        return push_only(cfg)
     bridge = Path(cfg["bridge_root"])
     sys.path.insert(0, str(bridge / "src"))
     from avito_bridge.ready_price.store import export_catalog, import_release

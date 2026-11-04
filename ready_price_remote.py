@@ -8,7 +8,8 @@ import tarfile
 import tempfile
 
 
-def push_release(release: Path, *, host="sprintbox-itp", remote_root="/opt/avito-ready-price"):
+def push_release(release: Path, *, host="sprintbox-itp", remote_root="/opt/avito-ready-price",
+                 transport="scp"):
     meta = json.loads(release.read_text(encoding="utf-8"))
     digest = meta["source_sha256"]
     if hashlib.sha256((release.parent / "price.xlsx").read_bytes()).hexdigest() != digest:
@@ -30,6 +31,13 @@ def push_release(release: Path, *, host="sprintbox-itp", remote_root="/opt/avito
                 path = release.parent / name
                 if path.is_file():
                     archive.add(path, arcname=name)
+        if transport == "stream":
+            # Ключ VPS на сервере Avito ограничен командой receive-ready-price:
+            # она принимает архив из stdin и атомарно кладёт его в inbox.
+            with bundle.open("rb") as stream:
+                subprocess.run(["ssh", "-o", "BatchMode=yes", host, f"receive {digest}"],
+                               stdin=stream, check=True, timeout=180, capture_output=True)
+            return digest
         partial = f"{remote_root}/incoming/{digest}.tgz.partial"
         final = f"{remote_root}/inbox/{digest}.tgz"
         subprocess.run(["ssh", "-o", "BatchMode=yes", host,

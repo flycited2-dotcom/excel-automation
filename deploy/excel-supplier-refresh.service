@@ -1,0 +1,13 @@
+[Unit]
+Description=БытТехОпт — тихое обновление наличия Технолидера для Avito (без Telegram)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=pricebot
+Group=pricebot
+WorkingDirectory=/opt/excel-automation
+ExecStart=/opt/excel-automation/.venv/bin/python -X utf8 refresh_supplier.py
+TimeoutStartSec=20min
+Nice=10

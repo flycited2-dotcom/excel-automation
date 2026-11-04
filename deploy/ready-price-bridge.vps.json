@@ -1,0 +1,10 @@
+{
+  "mode": "push_only",
+  "outbox": "/opt/excel-automation/ready-price-outbox",
+  "remote_push": {
+    "enabled": true,
+    "host": "sprintbox-avito",
+    "root": "/opt/avito-ready-price",
+    "transport": "stream"
+  }
+}

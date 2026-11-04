@@ -1,0 +1,9 @@
+[Unit]
+Description=БытТехОпт — обновление наличия Технолидера каждые 4 часа
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=4h
+
+[Install]
+WantedBy=timers.target
