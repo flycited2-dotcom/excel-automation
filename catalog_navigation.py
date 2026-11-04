@@ -11,9 +11,10 @@ from openpyxl.utils.units import pixels_to_EMU
 from openpyxl.worksheet.hyperlink import Hyperlink
 
 BASE = Path(__file__).parent
-TITLE_COLORS = ('DBEAF6', 'DEF0E6', 'F5E4D9', 'E9E0F3', 'F3DFE8',
-                'E2EDD8', 'DDEEF0', 'F3EBD6', 'E1E6F4', 'EDE3D9',
-                'EEE1ED', 'E5EEDC', 'DFE8F1', 'E9E5F0')
+# Насыщенные цвета кнопок «Открыть →» (белый текст читается на всех).
+BUTTON_COLORS = ('2F6FD6', '1F9D6B', 'D9682B', '7A4FC9', 'C9406A',
+                 '4E9A2F', '178A9E', 'B7871B', '3F5BC2', '9C5B2E',
+                 'A8459A', '5F8F2A', '2D7FB8', '6A55B0')
 SECTIONS = [
     ('Кондиционеры', 'climate', 'Бытовые и полупромышленные сплит-системы'),
     ('Расходники', 'supplies', 'Медь, изоляция, крепёж и материалы для монтажа'),
@@ -114,12 +115,13 @@ def card_image(path):
     return Image(stream)
 
 
-def _label(ws, cell_range, text, size=12, color='193C57', fill=None, link=None):
+def _label(ws, cell_range, text, size=12, color='193C57', fill=None, link=None, center=False):
     ws.merge_cells(cell_range)
     cell = ws[cell_range.split(':')[0]]
     cell.value = text
     cell.font = Font(name='Arial', size=size, bold=True, color=color)
-    cell.alignment = Alignment(vertical='center', wrap_text=True, indent=1)
+    cell.alignment = (Alignment(horizontal='center', vertical='center', wrap_text=True) if center
+                      else Alignment(vertical='center', wrap_text=True, indent=1))
     if fill:
         for row in ws[cell_range]:
             for c in row:
@@ -146,7 +148,7 @@ def build_navigation(df, wb, config, group_order, group_after):
             cell.fill = PatternFill('solid', fgColor='F1F3F8')
     _label(home, 'B2:L3', 'БЫТ ТЕХ ОПТ  /  КАТАЛОГ', 22, '26334D')
     _label(home, 'B4:L4', f'{datetime.now():%d.%m.%Y}  ·  {len(df):,} товаров  ·  {len(sections)} разделов'.replace(',', ' '), 11, '68758C')
-    _label(home, 'B6:L7', 'Нажмите на название раздела. Если ссылка не открывается — '
+    _label(home, 'B6:L7', 'Нажимайте на цветную кнопку «Открыть →» под картинкой. Если не открывается — '
            'разделы есть на вкладках листов внизу экрана', 12, '1F2937', 'FFFF00')
     image_links = []
     for index, (title, image_name, subtitle) in enumerate(sections):
@@ -175,10 +177,12 @@ def build_navigation(df, wb, config, group_order, group_after):
             to=AnchorMarker(col=col+5, colOff=0, row=row-1+8, rowOff=pixels_to_EMU(3)))
         home.add_image(image)
         image_links.append(target)
-        _label(home, f'{left}{row+9}:{right}{row+10}', f'{title}  →', 14,
-               '26334D', TITLE_COLORS[index % len(TITLE_COLORS)], title)
+        # Клик по картинке на телефонах не работает, поэтому прямо под ней —
+        # крупная цветная кнопка во всю ширину карточки (3 строки).
+        _label(home, f'{left}{row+8}:{right}{row+10}', f'{title}\nОткрыть →', 15, 'FFFFFF',
+               BUTTON_COLORS[index % len(BUTTON_COLORS)], title, center=True)
         _label(home, f'{left}{row+11}:{right}{row+12}',
-               f'{subtitle}\nПозиций: {len(subset)}', 10, '64728A')
+               f'{subtitle}\nПозиций: {len(subset)}', 10, '64728A', link=title)
     footer = 9 + ((len(sections)+1)//2)*14
     _label(home, f'B{footer}:L{footer+1}', 'ОТКРЫТЬ ВЕСЬ ПРАЙС  →', 13, 'FFFFFF', '657DBB', 'Прайс клиента')
     full = wb['Прайс клиента']

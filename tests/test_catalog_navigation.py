@@ -100,3 +100,27 @@ def assert_mobile_friendly(path):
             if name.startswith('xl/drawings/') and name.endswith('.xml'):
                 text = z.read(name).decode('utf-8')
                 assert 'oneCellAnchor' not in text, name
+
+
+def test_section_buttons_are_big_colored_and_linked():
+    """Клик по картинкам на телефонах не работает — нажимают на кнопку под ней."""
+    from catalog_navigation import BUTTON_COLORS
+    df = pd.DataFrame([dict(article='1', group='Классические сплит-системы', brand='T',
+                            name='AC', price_out=100),
+                       dict(article='2', group='Сковороды', brand='T', name='Pan', price_out=50)])
+    wb = openpyxl.Workbook()
+    build_pricelist(df, wb, {}, {})
+    build_navigation(df, wb, {}, {}, {})
+    home = wb['Главная']
+    for anchor, title, span in [('B17', 'Кондиционеры', 'B17:F19'),
+                                ('H17', 'Посуда и товары для дома', 'H17:L19')]:
+        button = home[anchor]
+        assert span in {str(r) for r in home.merged_cells.ranges}  # во всю ширину картинки
+        assert title in button.value and 'Открыть →' in button.value
+        assert button.font.b and button.font.color.rgb.endswith('FFFFFF') and button.font.sz >= 14
+        assert button.fill.fgColor.rgb[-6:] in BUTTON_COLORS
+        assert button.alignment.horizontal == 'center'
+        assert button.hyperlink.location == f"'{title}'!A1"
+        # описание под кнопкой тоже ведёт в раздел — больше площадь нажатия
+        below = home[anchor[0] + '20']
+        assert below.hyperlink.location == f"'{title}'!A1"
