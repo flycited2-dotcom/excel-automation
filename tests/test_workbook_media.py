@@ -5,6 +5,7 @@ from zipfile import ZipFile
 
 import openpyxl
 from openpyxl.drawing.image import Image as ExcelImage
+from openpyxl.worksheet.hyperlink import Hyperlink
 from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -18,7 +19,7 @@ def test_compression_shares_images_and_preserves_workbook(tmp_path):
     book = openpyxl.Workbook()
     sheet = book.active
     sheet['A1'] = 'Catalog'
-    sheet['A1'].hyperlink = "#'Second'!A1"
+    sheet['A1'].hyperlink = Hyperlink(ref='A1', location="'Second'!A1", display='Catalog')
     sheet['B2'] = 12345
     sheet.add_image(ExcelImage(source), 'D4')
     second = book.create_sheet('Second')
@@ -33,11 +34,14 @@ def test_compression_shares_images_and_preserves_workbook(tmp_path):
         assert all(zipfile.read(n) == data for n, data in xml.items())
         media = {n: zipfile.read(n) for n in zipfile.namelist() if n.startswith('xl/media/')}
         assert len(media) == 1
+        for name in zipfile.namelist():
+            if name.endswith(('.rels', '.xml')):
+                assert '<ns0:' not in zipfile.read(name).decode('utf-8'), name
         image = Image.open(BytesIO(next(iter(media.values()))))
         assert image.size == (680, 453)
     loaded = openpyxl.load_workbook(path)
     assert loaded.active['B2'].value == 12345
-    assert loaded.active['A1'].hyperlink.target == "#'Second'!A1"
+    assert loaded.active['A1'].hyperlink.location == "'Second'!A1"
     assert len(loaded.active._images) == len(loaded['Second']._images) == 1
     optimize_workbook_images(path)
     with ZipFile(path) as zipfile:

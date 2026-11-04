@@ -9,7 +9,8 @@ import pandas as pd
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from catalog_navigation import SECTIONS, build_navigation, link_navigation_images, section_for
+from catalog_navigation import SECTIONS, build_navigation, section_for
+from workbook_media import optimize_workbook_images
 from transform import build_pricelist
 from ready_price import capture
 
@@ -28,23 +29,25 @@ def test_category_menu_preserves_goods_prices_and_outbox(tmp_path):
     links = build_navigation(df, wb, {}, {}, {})
     path = tmp_path / 'БытТехОпт_20261012.xlsx'
     wb.save(path)
-    link_navigation_images(path, links)
+    optimize_workbook_images(path)
     result = openpyxl.load_workbook(path)
     assert result.active.title == 'Главная'
     assert len(result.active._images) == len(SECTIONS)
+    assert result.active.freeze_panes is None  # шапка не съедает экран телефона
     def goods(sheet):
         return [tuple(r[:6]) for r in sheet.values if isinstance(r[0], int)]
     combined = [r[1:] for title, _, _ in SECTIONS for r in goods(result[title])]
     assert Counter(combined) == Counter(r[1:] for r in goods(result['Прайс клиента']))
     for title, _, _ in SECTIONS:
         assert len(goods(result[title])) == 1
-        assert result[title]['H2'].hyperlink.target == "#'Главная'!A1"
-    with ZipFile(path) as z:
-        rels = ET.fromstring(z.read('xl/drawings/_rels/drawing1.xml.rels'))
-        targets = [r.attrib['Target'] for r in rels if r.attrib['Type'].endswith('/hyperlink')]
-        assert targets == links
-        drawing = ET.fromstring(z.read('xl/drawings/drawing1.xml'))
-        assert len(drawing.findall('.//{http://schemas.openxmlformats.org/drawingml/2006/main}hlinkClick')) == len(SECTIONS)
+        assert result[title]['H2'].hyperlink.location == "'Главная'!A1"
+    assert links == [f"'{title}'!A1" for title, _, _ in SECTIONS]
+    home_locations = {c.hyperlink.location for row in result['Главная'].iter_rows()
+                      for c in row if c.hyperlink is not None}
+    assert set(links) <= home_locations and "'Прайс клиента'!A1" in home_locations
+    hint = result['Главная']['B6']
+    assert hint.fill.fgColor.rgb.endswith('FFFF00') and hint.font.b  # подсказку не пропустить
+    assert_mobile_friendly(path)
     source = tmp_path / 'supplier.xls'
     source.write_bytes(b'supplier input')
     manifest = capture(path, input_path=source, outbox=tmp_path / 'outbox')
@@ -75,4 +78,25 @@ def test_empty_sections_are_not_shown():
     build_pricelist(df, wb, {}, {})
     links = build_navigation(df, wb, {}, {}, {})
     assert wb.sheetnames == ['Главная', 'Прайс клиента', 'Кондиционеры']
-    assert links == ["#'Кондиционеры'!A1"]
+    assert links == ["'Кондиционеры'!A1"]
+
+
+def assert_mobile_friendly(path):
+    """Мобильные просмотрщики: только внутренние ссылки и стандартный DrawingML."""
+    with ZipFile(path) as z:
+        names = z.namelist()
+        for name in names:
+            if not name.endswith(('.xml', '.rels')):
+                continue
+            text = z.read(name).decode('utf-8')
+            # ElementTree без register_namespace пишет ns0:/ns1: — их не понимают
+            # упрощённые парсеры (Polaris/Samsung и др.).
+            assert '<ns0:' not in text and ':ns0=' not in text, name
+            assert 'hlinkClick' not in text and 'alphaModFix' not in text, name
+            if name.endswith('.rels'):
+                # Ни одной «внешней» ссылки на лист вида #'Лист'!A1.
+                assert 'Target="#' not in text, name
+        for name in names:
+            if name.startswith('xl/drawings/') and name.endswith('.xml'):
+                text = z.read(name).decode('utf-8')
+                assert 'oneCellAnchor' not in text, name

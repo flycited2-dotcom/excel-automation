@@ -27,8 +27,17 @@ def _compress(data):
         return output.getvalue(), 'jpg'
 
 
+REL_NS = 'http://schemas.openxmlformats.org/package/2006/relationships'
+
+
+def _tostring(tree, namespace):
+    """XML с пространством имён по умолчанию, как пишет Excel (без префикса ns0:)."""
+    ET.register_namespace('', namespace)
+    return ET.tostring(tree, encoding='utf-8', xml_declaration=True)
+
+
 def optimize_workbook_images(filepath):
-    """Keep all worksheet data, hyperlinks and picture effects; share duplicates."""
+    """Keep all worksheet data and hyperlinks; compress and share duplicate images."""
     path = Path(filepath)
     tmp = path.with_suffix('.media.tmp')
     try:
@@ -66,7 +75,9 @@ def optimize_workbook_images(filepath):
                                 relationship.set('Target', '/' + replacements[absolute])
                                 changed = True
                         if changed:
-                            data = ET.tostring(tree, encoding='utf-8', xml_declaration=True)
+                            # default_namespace: без префиксов ns0: — их не понимают
+                            # упрощённые мобильные просмотрщики.
+                            data = _tostring(tree, REL_NS)
                     elif info.filename == '[Content_Types].xml':
                         tree = ET.fromstring(data)
                         ns = 'http://schemas.openxmlformats.org/package/2006/content-types'
@@ -77,7 +88,7 @@ def optimize_workbook_images(filepath):
                         for extension, mime in [('jpg', 'image/jpeg'), ('png', 'image/png')]:
                             if extension not in defaults:
                                 ET.SubElement(tree, f'{{{ns}}}Default', Extension=extension, ContentType=mime)
-                        data = ET.tostring(tree, encoding='utf-8', xml_declaration=True)
+                        data = _tostring(tree, ns)
                     dest.writestr(info.filename, data)
                 for name, data in media.items():
                     dest.writestr(name, data)

@@ -1,15 +1,14 @@
 """Category sheets and a photo menu, generated on every price run."""
 from datetime import datetime
+from io import BytesIO
 from pathlib import Path
-from zipfile import ZipFile, ZIP_DEFLATED
-import os
-import xml.etree.ElementTree as ET
 
+from PIL import Image as PILImage
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.drawing.image import Image
-from openpyxl.drawing.spreadsheet_drawing import OneCellAnchor, AnchorMarker
-from openpyxl.drawing.xdr import XDRPositiveSize2D
+from openpyxl.drawing.spreadsheet_drawing import TwoCellAnchor, AnchorMarker
 from openpyxl.utils.units import pixels_to_EMU
+from openpyxl.worksheet.hyperlink import Hyperlink
 
 BASE = Path(__file__).parent
 TITLE_COLORS = ('DBEAF6', 'DEF0E6', 'F5E4D9', 'E9E0F3', 'F3DFE8',
@@ -87,6 +86,34 @@ def section_for(group):
     return 'Прочие товары'
 
 
+PAGE_BG = 'F1F3F8'
+CARD_W, CARD_H = 340, 227          # px; 5 колонок по 9 ≈ 68 px, 8 строк по 21 pt = 28 px
+CARD_OPACITY = 0.7                 # осветление «запекается» в картинку, без эффектов DrawingML
+
+
+def link_to_sheet(cell, sheet_title):
+    """Внутренняя ссылка через location (как пишет сам Excel).
+
+    Строка вида "#'Лист'!A1" превращается в openpyxl во ВНЕШНЮЮ связь — мобильные
+    просмотрщики пытаются открыть её как веб-адрес, и переход не работает.
+    """
+    cell.hyperlink = Hyperlink(ref=cell.coordinate, location=f"'{sheet_title}'!A1",
+                               display=str(cell.value or sheet_title))
+
+
+def card_image(path):
+    """PNG карточки, смешанный с фоном страницы: тот же вид, что прежний alphaModFix."""
+    with PILImage.open(path) as source:
+        picture = source.convert('RGBA')
+    background = PILImage.new('RGBA', picture.size, '#' + PAGE_BG)
+    blended = PILImage.alpha_composite(background, picture)
+    result = PILImage.blend(background, blended, CARD_OPACITY).convert('RGB')
+    stream = BytesIO()
+    result.save(stream, format='PNG')
+    stream.seek(0)
+    return Image(stream)
+
+
 def _label(ws, cell_range, text, size=12, color='193C57', fill=None, link=None):
     ws.merge_cells(cell_range)
     cell = ws[cell_range.split(':')[0]]
@@ -98,7 +125,7 @@ def _label(ws, cell_range, text, size=12, color='193C57', fill=None, link=None):
             for c in row:
                 c.fill = PatternFill('solid', fgColor=fill)
     if link:
-        cell.hyperlink = link
+        link_to_sheet(cell, link)
     return cell
 
 
@@ -108,7 +135,6 @@ def build_navigation(df, wb, config, group_order, group_after):
     home.sheet_view.showGridLines = False
     home.sheet_view.zoomScale = 85
     home.sheet_properties.tabColor = '758ADB'
-    home.freeze_panes = 'A9'
     for col in 'ABCDEFGHIJKLM':
         home.column_dimensions[col].width = 9
     destinations = df['group'].map(section_for)
@@ -120,8 +146,8 @@ def build_navigation(df, wb, config, group_order, group_after):
             cell.fill = PatternFill('solid', fgColor='F1F3F8')
     _label(home, 'B2:L3', 'БЫТ ТЕХ ОПТ  /  КАТАЛОГ', 22, '26334D')
     _label(home, 'B4:L4', f'{datetime.now():%d.%m.%Y}  ·  {len(df):,} товаров  ·  {len(sections)} разделов'.replace(',', ' '), 11, '68758C')
-    _label(home, 'B6:L7', 'Нажмите на карточку или название — откроется нужный раздел', 12,
-           '405275', 'E5EAF5')
+    _label(home, 'B6:L7', 'Нажмите на название раздела. Если ссылка не открывается — '
+           'разделы есть на вкладках листов внизу экрана', 12, '1F2937', 'FFFF00')
     image_links = []
     for index, (title, image_name, subtitle) in enumerate(sections):
         row = 9 + (index//2)*14
@@ -133,27 +159,31 @@ def build_navigation(df, wb, config, group_order, group_after):
         sheet.sheet_properties.tabColor = '758ADB'
         sheet.column_dimensions['H'].width = 24
         sheet['H2'] = 'На главную'
-        sheet['H2'].hyperlink = "#'Главная'!A1"
+        link_to_sheet(sheet['H2'], 'Главная')
         sheet['H2'].font = Font(name='Arial', bold=True, size=12, color='546BB5', underline='single')
-        target = f"#'{title}'!A1"
+        target = f"'{title}'!A1"
         path = BASE / 'assets' / 'catalog' / 'glass' / f'{image_name}.png'
         if not path.is_file():
             raise FileNotFoundError(f'Не найдена картинка каталога: {path.name}')
-        image = Image(str(path))
-        image.anchor = OneCellAnchor(
-            _from=AnchorMarker(col=ord(left)-65, row=row-1),
-            ext=XDRPositiveSize2D(pixels_to_EMU(340), pixels_to_EMU(227)))
+        image = card_image(path)
+        col = ord(left) - 65
+        # twoCellAnchor editAs="oneCell" — так картинки пишет сам Excel;
+        # oneCellAnchor многие сторонние просмотрщики не отображают.
+        image.anchor = TwoCellAnchor(
+            editAs='oneCell',
+            _from=AnchorMarker(col=col, row=row-1),
+            to=AnchorMarker(col=col+5, colOff=0, row=row-1+8, rowOff=pixels_to_EMU(3)))
         home.add_image(image)
         image_links.append(target)
-        _label(home, f'{left}{row+9}:{right}{row+10}', title, 14,
-               '26334D', TITLE_COLORS[index % len(TITLE_COLORS)], target)
+        _label(home, f'{left}{row+9}:{right}{row+10}', f'{title}  →', 14,
+               '26334D', TITLE_COLORS[index % len(TITLE_COLORS)], title)
         _label(home, f'{left}{row+11}:{right}{row+12}',
                f'{subtitle}\nПозиций: {len(subset)}', 10, '64728A')
     footer = 9 + ((len(sections)+1)//2)*14
-    _label(home, f'B{footer}:L{footer+1}', 'ОТКРЫТЬ ВЕСЬ ПРАЙС  →', 13, 'FFFFFF', '657DBB', "#'Прайс клиента'!A1")
+    _label(home, f'B{footer}:L{footer+1}', 'ОТКРЫТЬ ВЕСЬ ПРАЙС  →', 13, 'FFFFFF', '657DBB', 'Прайс клиента')
     full = wb['Прайс клиента']
     full['H2'] = 'На главную'
-    full['H2'].hyperlink = "#'Главная'!A1"
+    link_to_sheet(full['H2'], 'Главная')
     full['H2'].font = Font(name='Arial', bold=True, color='546BB5', underline='single')
     full.column_dimensions['H'].width = 24
     wb.active = 0
@@ -165,42 +195,3 @@ def build_navigation(df, wb, config, group_order, group_after):
     home.sheet_properties.pageSetUpPr.fitToPage = True
     return image_links
 
-
-def link_navigation_images(filepath, targets):
-    """Add DrawingML click relationships unsupported by openpyxl's image API."""
-    if not targets:
-        return
-    drawing = 'xl/drawings/drawing1.xml'
-    rel_path = 'xl/drawings/_rels/drawing1.xml.rels'
-    a = 'http://schemas.openxmlformats.org/drawingml/2006/main'
-    xdr = 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing'
-    rel = 'http://schemas.openxmlformats.org/package/2006/relationships'
-    office = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
-    tmp = Path(filepath).with_suffix('.nav.tmp')
-    try:
-        with ZipFile(filepath) as src, ZipFile(tmp, 'w', ZIP_DEFLATED) as dst:
-            tree = ET.fromstring(src.read(drawing))
-            relationships = ET.fromstring(src.read(rel_path))
-            pictures = tree.findall(f'.//{{{xdr}}}cNvPr')
-            if len(pictures) != len(targets):
-                raise ValueError('Количество картинок меню не совпадает со ссылками')
-            # Excel picture transparency softens the glow against the pale sheet
-            # without modifying or regenerating the original illustrations.
-            for blip in tree.findall(f'.//{{{a}}}blip'):
-                ET.SubElement(blip, f'{{{a}}}alphaModFix', {'amt': '70000'})
-            for i, (picture, target) in enumerate(zip(pictures, targets), 1):
-                rid = f'navLink{i}'
-                ET.SubElement(picture, f'{{{a}}}hlinkClick', {f'{{{office}}}id': rid,
-                              'tooltip': 'Открыть раздел каталога'})
-                ET.SubElement(relationships, f'{{{rel}}}Relationship', {
-                    'Id': rid, 'Type': office + '/hyperlink', 'Target': target, 'TargetMode': 'External'})
-            for info in src.infolist():
-                data = src.read(info.filename)
-                if info.filename == drawing:
-                    data = ET.tostring(tree, encoding='utf-8', xml_declaration=True)
-                elif info.filename == rel_path:
-                    data = ET.tostring(relationships, encoding='utf-8', xml_declaration=True)
-                dst.writestr(info, data)
-        os.replace(tmp, filepath)
-    finally:
-        tmp.unlink(missing_ok=True)

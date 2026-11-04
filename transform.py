@@ -782,8 +782,8 @@ def transform(input_path, output_dir=None, *, supplier_fallback=False):
     group_after = config.get('group_after', {})
     wb = openpyxl.Workbook()
     build_pricelist(df, wb, config, group_order, group_after)
-    from catalog_navigation import build_navigation, link_navigation_images
-    navigation_links = build_navigation(df, wb, config, group_order, group_after)
+    from catalog_navigation import build_navigation
+    build_navigation(df, wb, config, group_order, group_after)
 
     if output_dir is None:
         output_dir = str(BASE_DIR / 'output')
@@ -801,7 +801,6 @@ def transform(input_path, output_dir=None, *, supplier_fallback=False):
         print(f"  Сохраняю под другим именем...")
         wb.save(alt)
         output_path = alt
-    link_navigation_images(output_path, navigation_links)
     from workbook_media import optimize_workbook_images
     optimize_workbook_images(output_path)
     from daily_price_news import write_snapshot
