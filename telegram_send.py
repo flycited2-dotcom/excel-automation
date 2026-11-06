@@ -107,7 +107,7 @@ def _send_file(filepath: str, caption: str = None, chat_id: str = None) -> bool:
             files={'document': (filepath.name, f,
                    _document_mime_type(filepath))},
             data=data,
-            timeout=60,
+            timeout=(15, 120),
         )
 
     if resp.status_code == 200:
@@ -124,6 +124,33 @@ def _send_file(filepath: str, caption: str = None, chat_id: str = None) -> bool:
         return False
 
 
+CONNECT_ATTEMPTS = 4
+CONNECT_PAUSE = 20
+
+
+def _send_with_retry(filepath, caption, chat_id):
+    """Повторяет отправку, только если до Telegram не удалось подключиться.
+
+    06.11.2026: с VPS Telegram доступен лишь по IPv6, и тот изредка не
+    отвечает — одна ConnectTimeout сорвала утреннюю рассылку. Ошибка
+    подключения значит, что файл точно не ушёл, поэтому повтор безопасен.
+    ReadTimeout не повторяем: файл мог уже дойти, и клиенты получили бы дубль.
+    """
+    import time
+    import requests
+    for attempt in range(1, CONNECT_ATTEMPTS + 1):
+        try:
+            return _send_file(filepath, caption, chat_id)
+        except requests.exceptions.ConnectionError as exc:
+            not_connected = (isinstance(exc, requests.exceptions.ConnectTimeout)
+                             or 'NewConnectionError' in repr(exc))
+            if attempt == CONNECT_ATTEMPTS or not not_connected:
+                raise
+            print(f"Нет связи с Telegram ({type(exc).__name__}), "
+                  f"повтор {attempt + 1}/{CONNECT_ATTEMPTS} через {CONNECT_PAUSE} с")
+            time.sleep(CONNECT_PAUSE)
+
+
 def send_file(filepath: str, caption: str = None, chat_id: str = None) -> bool:
     """Доставка учитывается отдельно от успешного формирования итогового прайса."""
     error_type = None
@@ -131,7 +158,7 @@ def send_file(filepath: str, caption: str = None, chat_id: str = None) -> bool:
     try:
         if route is None:
             route = load_config().get('telegram', {}).get('channel_id', '')
-        ok = _send_file(filepath, caption, chat_id)
+        ok = _send_with_retry(filepath, caption, chat_id)
     except Exception as exc:
         # Текст requests-ошибки может содержать URL с токеном бота.
         error_type = type(exc).__name__

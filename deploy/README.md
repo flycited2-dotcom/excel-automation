@@ -49,8 +49,13 @@ journalctl -u excel-price-daily.service -n 100     # вывод последни
 ls /opt/excel-automation/logs/                     # логи daily_ГГГГММДД.log
 ```
 
-## Пробный режим
+## Боевой режим (с 06.11.2026)
 
-Пока в `secrets.json` на сервере `telegram.channel_id` равен личному чату,
-итоговый прайс уходит только владельцу. Для боевого режима это поле удаляется,
-и берётся канал из `config.json`.
+Сервер шлёт прайс в клиентский канал из `config.json`; задача
+`БытТехОпт_Ежедневный_прайс` на ПК TLT-1 выключена (не удалена).
+Копия пробных настроек — `secrets.json.bak-trial` (там `telegram.channel_id`
+= личный чат). Вернуть пробный режим: `cp -p secrets.json.bak-trial secrets.json`.
+
+С VPS Telegram доступен только по IPv6 (IPv4 до api.telegram.org не проходит),
+и IPv6 изредка не отвечает. Поэтому `telegram_send.send_file` повторяет
+отправку до 4 раз, но только при ошибке подключения — без риска дублей.
