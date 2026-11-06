@@ -330,6 +330,9 @@ def load_markups(config):
 
 # ─── Чтение прайса поставщика ─────────────────────────────────────────────────
 
+MISSING_GROUP = 'Без группы'
+
+
 def read_supplier_price(filepath, config):
     skiprows = config.get('read_options', {}).get('skiprows', 0)
     df = pd.read_excel(filepath, skiprows=skiprows, header=None)
@@ -343,8 +346,13 @@ def read_supplier_price(filepath, config):
     df = df.dropna(subset=['price_in'])
     df = df.reset_index(drop=True)
 
-    df['article'] = df['article'].astype(str).str.strip()
-    df['group'] = df['group'].astype(str).str.strip()
+    df['article'] = df['article'].fillna('').astype(str).str.strip()
+    # pandas 3 сохраняет пустые значения при astype(str): пустая группа у
+    # поставщика (06.11.2026 — 4 товара) роняла всю сборку.
+    df['group'] = df['group'].fillna('').astype(str).str.strip().replace('', MISSING_GROUP)
+    missing = int((df['group'] == MISSING_GROUP).sum())
+    if missing:
+        print(f"  ⚠ У поставщика без группы: {missing} — пойдут в «{MISSING_GROUP}» с наценкой по умолчанию")
     df['brand'] = df['brand'].fillna('').astype(str).str.strip()
     df['name'] = df['name'].astype(str).str.strip()
 
@@ -519,7 +527,7 @@ def apply_pricing(df, group_markups, default_markup, brand_rules=None):
             prices_out.append(row['price_out'])
             continue
 
-        group = row['group']
+        group = row['group'] if isinstance(row['group'], str) else ''
         markup_pct = group_markups.get(group)
         if markup_pct is None:
             markup_pct = group_markups.get(group.rstrip())

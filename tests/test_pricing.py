@@ -56,3 +56,22 @@ def test_tlt_homeline_rows_are_ignored():
     kept = drop_supplier_only_brands(df, RULES)
     assert kept.brand.tolist() == ['Vitek', 'HOMELINE']
     assert kept.get('source').fillna('').tolist() == ['tlt', '']
+
+
+def test_supplier_rows_without_group_do_not_break_build(tmp_path):
+    """06.11.2026: у Технолидера 4 товара пришли без группы — сборка упала."""
+    import openpyxl
+    from transform import read_supplier_price, MISSING_GROUP
+    book = openpyxl.Workbook()
+    sheet = book.active
+    sheet.append(['00-1', 'Холодильники', 'Brand', 'Холодильник A', 1000, '*', None, None])
+    sheet.append(['00-2', None, 'Hotpoint', 'Встраиваемый холодильник B', 2000, None, '*', None])
+    path = tmp_path / 'supplier.xlsx'
+    book.save(path)
+    df = read_supplier_price(path, {'read_options': {'skiprows': 0}})
+    assert df.group.tolist() == ['Холодильники', MISSING_GROUP]
+    priced = apply_pricing(df, {'Холодильники': 5}, 10)
+    assert priced.price_out.tolist() == [1050, 2200]
+    # и даже если пустая группа пришла из другого источника — не падаем
+    raw = pd.DataFrame([item(float('nan'), 100, brand='X')])
+    assert apply_pricing(raw, {}, 10).price_out.iloc[0] == 110

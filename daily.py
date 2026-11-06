@@ -149,6 +149,11 @@ def main() -> None:
         log.info("=== Успех ===")
     except Exception as e:
         log.error("ОШИБКА ежедневного запуска: %s", type(e).__name__)
+        # Только файлы и строки, без текста исключения: в нём бывают URL с токенами.
+        import traceback
+        log.error("Где: %s", ' <- '.join(
+            f"{Path(f.filename).name}:{f.lineno} {f.name}"
+            for f in reversed(traceback.extract_tb(e.__traceback__))))
         send_alert(
             log,
             f"⚠️ БытТехОпт: автоотправка прайса не удалась.\n"
